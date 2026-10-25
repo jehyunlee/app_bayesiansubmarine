@@ -1,0 +1,1485 @@
+<!doctype html><html lang="ko"><head><meta charset=utf8><meta name=viewport content="width=device-width,initial-scale=1,viewport-fit=cover"><style>:root{color-scheme:light;box-sizing:border-box;padding-top:env(safe-area-inset-top,0px);padding-bottom:env(safe-area-inset-bottom,0px)}html{scroll-padding-top:env(safe-area-inset-top,0px)}body{margin:0;padding:0;font:14px -apple-system,BlinkMacSystemFont,sans-serif;background:#fff;color:#000}img{max-width:100%}[hidden]:not([hidden=until-found i]){display:none!important}</style></head><body>
+<title>베이즈 잠수함 수색</title>
+<link rel="preconnect" href="https://fonts.googleapis.com">
+<link rel="preconnect" href="https://fonts.gstatic.com" crossorigin>
+<link rel="stylesheet" href="https://fonts.googleapis.com/css2?family=Hahmlet:wght@500;700&family=IBM+Plex+Mono:wght@400;500&family=IBM+Plex+Sans+KR:wght@400;500;600&display=swap">
+<style>
+/* Layout: plotting-room sheet. Night-ocean search chart on the left, plotting log and the truth/belief panels on the right, the cost-of-ignorance experiment and method notes below. */
+:root{
+  --paper:#e7ecee;
+  --sheet:#f5f7f7;
+  --ink:#10222d;
+  --ink-soft:#4b5f6a;
+  --rule:#c3cfd5;
+  --signal:#c94b17;
+  --signal-ink:#ffffff;
+  --found:#23714f;
+  --trace:#2b6a80;
+  --sea:#0d2230;
+  --font-display:"Hahmlet","Nanum Myeongjo","AppleMyungjo",serif;
+  --font-body:"IBM Plex Sans KR","Apple SD Gothic Neo","Malgun Gothic","Noto Sans KR",system-ui,sans-serif;
+  --font-mono:"IBM Plex Mono",ui-monospace,"SFMono-Regular",Menlo,Consolas,monospace;
+}
+@media (prefers-color-scheme: dark){
+  :root:not([data-theme="light"]){
+    --paper:#09151c; --sheet:#0f1f29; --ink:#e1e9ec; --ink-soft:#93a8b2; --rule:#213846;
+    --signal:#ff7a3d; --signal-ink:#1b0b03; --found:#5cc596; --trace:#74bcd3; --sea:#07141c;
+    color-scheme:dark;
+  }
+}
+:root[data-theme="dark"]{
+  --paper:#09151c; --sheet:#0f1f29; --ink:#e1e9ec; --ink-soft:#93a8b2; --rule:#213846;
+  --signal:#ff7a3d; --signal-ink:#1b0b03; --found:#5cc596; --trace:#74bcd3; --sea:#07141c;
+  color-scheme:dark;
+}
+*{box-sizing:border-box}
+body{background:var(--paper);color:var(--ink);font-family:var(--font-body);font-size:15px;line-height:1.6;-webkit-font-smoothing:antialiased}
+.wrap{max-width:1180px;margin:0 auto;padding-inline:20px;padding-block:28px 56px}
+@media (max-width:520px){.wrap{padding-inline:16px;padding-block:20px 44px}}
+
+.eyebrow{font-family:var(--font-mono);font-size:12px;letter-spacing:.08em;color:var(--ink-soft);margin:0}
+h1{font-family:var(--font-display);font-weight:700;font-size:clamp(1.9rem,1.1rem + 3vw,2.9rem);line-height:1.15;letter-spacing:-.01em;margin:.25em 0 .35em;text-wrap:balance}
+.lede{max-width:64ch;color:var(--ink-soft);margin:0}
+.head{margin-bottom:24px}
+
+.layout{display:grid;gap:24px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:920px){.layout{grid-template-columns:minmax(0,1.6fr) minmax(300px,1fr);gap:32px}}
+.chartcol{min-width:0;display:flex;flex-direction:column;gap:10px}
+
+.toolbar{display:flex;flex-wrap:wrap;gap:8px 14px;align-items:center;justify-content:space-between}
+.seg{display:inline-flex;border:1px solid var(--rule);border-radius:4px;background:var(--sheet);overflow:hidden}
+.seg button{font:500 13px/1.2 var(--font-body);padding:8px 11px;border:0;background:transparent;color:var(--ink-soft);cursor:pointer;white-space:nowrap}
+.seg button + button{border-left:1px solid var(--rule)}
+.seg button[aria-pressed="true"]{background:var(--ink);color:var(--paper)}
+.seg button:disabled{opacity:.4;cursor:default}
+.seg.full{display:flex}
+.seg.full button{flex:1 1 0;min-width:0;padding-inline:6px}
+.seg button:focus-visible,.btn:focus-visible,canvas:focus-visible,input:focus-visible{outline:2px solid var(--signal);outline-offset:2px}
+.scalewrap{display:flex;align-items:center;gap:8px}
+.mini{font-size:12px;color:var(--ink-soft)}
+
+.map{background:var(--sea);border-radius:4px;overflow:hidden}
+.map canvas{display:block;width:100%;touch-action:manipulation;cursor:crosshair}
+
+.legend{display:flex;flex-wrap:wrap;gap:6px 18px;align-items:flex-start}
+.ramp{width:190px;flex:none}
+.ramp .bar{height:8px;border-radius:2px}
+.ramp-labels{position:relative;height:16px;font-family:var(--font-mono);font-size:11px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.ramp-labels span{position:absolute;top:2px;white-space:nowrap}
+.ramp-labels span:nth-child(1){left:0}
+.ramp-labels span:nth-child(2){left:50%;transform:translateX(-50%)}
+.ramp-labels span:nth-child(3){right:0}
+.legend-note{margin:0;font-size:12.5px;color:var(--ink-soft);flex:1 1 220px;min-width:0}
+.readout{margin:0;min-height:3.2em;font-family:var(--font-mono);font-size:12.5px;color:var(--ink-soft);font-variant-numeric:tabular-nums;border-top:1px solid var(--rule);padding-top:8px}
+.readout b{color:var(--ink);font-weight:500}
+.readout .hint{color:var(--signal)}
+.readout .tru{color:var(--found)}
+
+.side{display:flex;flex-direction:column;gap:22px;min-width:0}
+.status-line{display:flex;gap:10px;align-items:baseline;margin-bottom:12px}
+.status-line span:last-child{min-width:0}
+.pill{flex:none;font-family:var(--font-mono);font-size:11px;letter-spacing:.06em;padding:1px 8px;border-radius:999px;border:1px solid var(--rule);color:var(--ink-soft);white-space:nowrap}
+.pill.run{border-color:var(--signal);color:var(--signal)}
+.pill.ok{border-color:var(--found);color:var(--found)}
+#statusText{font-size:14px}
+.readouts{display:grid;grid-template-columns:1fr 1fr;gap:12px 16px;margin:0}
+.readouts div{border-top:1px solid var(--rule);padding-top:6px}
+.readouts dt{font-size:12px;color:var(--ink-soft)}
+.readouts dd{margin:0;font-family:var(--font-mono);font-size:22px;font-weight:500;font-variant-numeric:tabular-nums;line-height:1.3}
+.readouts dd small{font-size:12px;color:var(--ink-soft);margin-left:4px;font-weight:400}
+
+.controls{display:grid;gap:8px}
+.row2{display:grid;grid-template-columns:1fr 1fr;gap:8px}
+.row3{display:grid;grid-template-columns:1fr 1fr 1fr;gap:8px}
+.btn{font:600 14px/1.2 var(--font-body);padding:10px 10px;border-radius:4px;border:1px solid var(--rule);background:var(--sheet);color:var(--ink);cursor:pointer}
+.btn:hover:not(:disabled){border-color:var(--ink-soft)}
+.btn.primary{background:var(--signal);border-color:var(--signal);color:var(--signal-ink)}
+.btn.primary:hover:not(:disabled){filter:brightness(1.06);border-color:var(--signal)}
+.btn[aria-pressed="true"]{background:var(--ink);color:var(--paper);border-color:var(--ink)}
+.btn:disabled{opacity:.45;cursor:default}
+.row3 .btn{font-size:13px;font-weight:500}
+.controls .set-row{margin-top:6px}
+
+.card{background:var(--sheet);border:1px solid var(--rule);border-radius:4px;padding:14px 16px}
+.h-sm{font-size:13px;font-weight:600;margin:0 0 8px;color:var(--ink)}
+.upd-head{display:flex;flex-wrap:wrap;gap:4px 10px;align-items:baseline;font-size:13px;color:var(--ink-soft);margin-bottom:10px}
+.upd-head b{color:var(--ink);font-weight:600}
+.eq{font-family:var(--font-mono);font-size:12.5px;font-variant-numeric:tabular-nums;display:grid;gap:3px}
+.eq .lab{font-family:var(--font-body);font-size:12px;color:var(--ink-soft);margin-top:6px}
+.eq .lab:first-child{margin-top:0}
+.eq .f{color:var(--ink)}
+.eq .n{color:var(--ink-soft);overflow-wrap:anywhere}
+.eq .n b{color:var(--signal);font-weight:500}
+.eq .n .tru{color:var(--found)}
+.upd-note{font-size:12.5px;color:var(--ink-soft);margin:10px 0 0}
+
+.group{display:grid;gap:16px;border-top:1px solid var(--rule);padding-top:16px}
+.grp-h{display:flex;align-items:center;gap:8px;font-size:14px;font-weight:600;margin:0}
+.grp-h::before{content:"";width:9px;height:9px;border-radius:2px;background:var(--found);flex:none}
+.group.belief .grp-h::before{background:var(--signal)}
+.grp-sub{font-size:12.5px;color:var(--ink-soft);margin:-10px 0 0}
+.set-row{display:grid;gap:8px}
+.set-row .top{display:flex;justify-content:space-between;align-items:baseline;gap:8px;font-size:13px;font-weight:500}
+.set-row .top output{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);font-weight:400}
+.set-row input[type=range]{width:100%;accent-color:var(--signal)}
+.group.truth input[type=range]{accent-color:var(--found)}
+.help{font-size:12px;color:var(--ink-soft);margin:0}
+.sub-set{display:grid;gap:6px;padding-left:12px;border-left:2px solid var(--rule)}
+.sub-set .top{font-weight:400}
+
+.scen ul{list-style:none;margin:0;padding:0;display:grid;gap:8px}
+.scen li{display:grid;grid-template-columns:22px minmax(0,1fr) auto;gap:4px 10px;align-items:center;font-size:13px}
+.scen.dim li{opacity:.55}
+.chip{width:20px;height:20px;border-radius:50%;background:var(--sea);color:#fde7a8;font:600 11px/20px var(--font-body);text-align:center}
+.chip.floor{background:transparent;border:1px dashed var(--ink-soft);color:var(--ink-soft);line-height:18px}
+.scen .w{font-family:var(--font-mono);font-size:12px;color:var(--ink-soft);font-variant-numeric:tabular-nums}
+.scen .wbar{grid-column:2 / 4;height:3px;background:var(--rule);border-radius:2px;overflow:hidden}
+.scen .wbar i{display:block;height:100%;background:var(--signal)}
+
+.etapost{display:grid;gap:2px}
+.etapost .ttl{font-size:12.5px;font-weight:500}
+.etapost .sum{font-size:12px;color:var(--ink-soft);font-family:var(--font-mono);font-variant-numeric:tabular-nums}
+.etapost .sum b{color:var(--ink);font-weight:500}
+.etapost .sum .tru{color:var(--found)}
+.etapost svg{display:block;width:100%;height:auto}
+.etapost .bar{fill:var(--trace)}
+.etapost .base{stroke:var(--ink-soft);stroke-dasharray:3 3;stroke-width:1}
+.etapost .truth{stroke:var(--found);stroke-width:2}
+.etapost .axis{stroke:var(--rule);stroke-width:1}
+.etapost text{font:10px var(--font-mono);fill:var(--ink-soft)}
+.etapost text.tl{fill:var(--found);font-weight:500}
+
+h2{font-family:var(--font-display);font-weight:700;font-size:1.4rem;line-height:1.25;margin:0 0 14px;text-wrap:balance}
+.group h2.grp-h{font-family:var(--font-body);font-size:14px;line-height:1.3;margin:0}
+.history{margin-top:44px;border-top:1px solid var(--rule);padding-top:24px}
+.charts{display:grid;gap:24px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:760px){.charts{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+figure{margin:0;min-width:0}
+figcaption{font-size:14px;font-weight:600;margin-bottom:6px}
+.chart{min-height:180px;position:relative}
+.chart svg{display:block}
+.chart-empty{height:180px;display:flex;align-items:center;justify-content:center;text-align:center;padding:0 16px;border:1px dashed var(--rule);border-radius:4px;color:var(--ink-soft);font-size:13px}
+.cap{font-size:12.5px;color:var(--ink-soft);margin:6px 0 0}
+.chart text.ax{fill:var(--ink-soft);font:11px var(--font-mono)}
+.chart text.val{fill:var(--ink);font:500 12px var(--font-mono)}
+.chart .grid{stroke:var(--rule);stroke-width:1}
+.chart .line{fill:none;stroke:var(--signal);stroke-width:2;stroke-linejoin:round}
+.chart .area{fill:var(--signal);opacity:.13}
+.chart .lineB{fill:none;stroke:var(--trace);stroke-width:2;stroke-linejoin:round}
+.chart .areaB{fill:var(--trace);opacity:.13}
+.chart .dot{fill:var(--signal)}
+.chart .dotB{fill:var(--trace)}
+.chart .miss{fill:var(--sheet);stroke:var(--signal);stroke-width:1.6}
+.chart .fline{stroke:var(--found);stroke-width:1.5;stroke-dasharray:3 3}
+.chart text.flbl{fill:var(--found);font:500 11px var(--font-body)}
+
+/* cost-of-ignorance experiment */
+.cost{margin-top:44px;border-top:1px solid var(--rule);padding-top:24px}
+.cost-head{display:flex;flex-wrap:wrap;gap:12px 32px;align-items:flex-end;justify-content:space-between}
+.cost-head > div:first-child{min-width:0;flex:1 1 420px}
+.cost .intro{max-width:66ch;margin:0}
+.cost .intro + .intro{margin-top:10px;color:var(--ink-soft);font-size:14px}
+.cost-run{display:flex;align-items:center;gap:12px;flex-wrap:wrap}
+.cmp-legend{display:flex;flex-wrap:wrap;gap:6px 20px;font-size:12.5px;color:var(--ink-soft);margin:22px 0 6px}
+.cmp-legend span{display:inline-flex;align-items:center;gap:6px}
+.lg-dot{width:11px;height:11px;border-radius:50%;background:var(--trace);display:inline-block}
+.lg-wh{width:22px;height:11px;display:inline-block;background:linear-gradient(var(--trace),var(--trace)) left center/100% 2px no-repeat,linear-gradient(var(--trace),var(--trace)) right center/2px 100% no-repeat}
+.lg-cur{width:11px;height:11px;border-radius:50%;background:var(--signal);display:inline-block}
+.cmp{display:grid;transition:opacity .2s}
+.cmp.stale{opacity:.45}
+.cmp-row{display:grid;grid-template-columns:minmax(0,14rem) minmax(0,1fr) 7.5rem;gap:4px 16px;align-items:center;padding:9px 0;border-top:1px solid var(--rule)}
+.cmp-row.hdr{border-top:0;padding:0 0 4px;font-size:12px;color:var(--ink-soft)}
+.cmp-row.hdr .cmp-val{font-family:var(--font-body);font-size:12px}
+.cmp-label{min-width:0}
+.cmp-label b{display:flex;align-items:center;gap:8px;flex-wrap:wrap;font-size:13.5px;font-weight:600}
+.cmp-label span{display:block;font-size:12px;color:var(--ink-soft)}
+.cmp-label .pill{font-size:10.5px;padding:0 7px}
+.cmp-track{position:relative;height:24px}
+.cmp-track .gl{position:absolute;top:0;bottom:0;width:1px;background:var(--rule)}
+.cmp-track .wh{position:absolute;top:50%;height:2px;margin-top:-1px;background:var(--trace)}
+.cmp-track .wh.open{background:linear-gradient(90deg,var(--trace),transparent)}
+.cmp-track .cp{position:absolute;top:5px;bottom:5px;width:2px;margin-left:-1px;background:var(--trace)}
+.cmp-track .dt{position:absolute;top:50%;width:13px;height:13px;border-radius:50%;background:var(--trace);transform:translate(-50%,-50%);box-shadow:0 0 0 2px var(--paper)}
+.cmp-track .dt.open{background:var(--paper);border:2px solid var(--trace)}
+.cmp-track .wait{position:absolute;left:0;top:50%;transform:translateY(-50%);font-size:12px;color:var(--ink-soft)}
+.cmp-row.cur .wh,.cmp-row.cur .cp,.cmp-row.cur .dt{background:var(--signal)}
+.cmp-row.cur .wh.open{background:linear-gradient(90deg,var(--signal),transparent)}
+.cmp-row.cur .dt.open{background:var(--paper);border-color:var(--signal)}
+.cmp-val{font-family:var(--font-mono);font-size:12.5px;text-align:right;font-variant-numeric:tabular-nums;color:var(--ink-soft)}
+.cmp-val b{color:var(--ink);font-weight:500;font-size:14px}
+.cmp-val small{display:block;font-size:11px}
+.cmp-axis{position:relative;height:18px;font:11px var(--font-mono);color:var(--ink-soft)}
+.cmp-axis span{position:absolute;top:2px;transform:translateX(-50%);white-space:nowrap}
+.cmp-row.axis{border-top:1px solid var(--rule);padding-top:2px}
+@media (max-width:620px){
+  .cmp-row{grid-template-columns:minmax(0,1fr) 6.2rem;gap:6px 12px}
+  .cmp-row .cmp-label{grid-column:1 / -1}
+  .cmp-row.hdr .cmp-label,.cmp-row.axis .cmp-label{display:none}
+}
+
+.notes{display:grid;gap:20px 28px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:640px){.notes{grid-template-columns:minmax(0,1fr) minmax(0,1fr)}}
+.notes.three{margin-top:28px}
+@media (min-width:960px){.notes.three{grid-template-columns:repeat(3,minmax(0,1fr))}}
+.notes h3{font-size:15px;font-weight:600;margin:0 0 4px}
+.notes p{margin:0;font-size:14px;color:var(--ink-soft)}
+.notes .formula{display:block;font-family:var(--font-mono);font-size:12.5px;color:var(--ink);margin:6px 0;line-height:1.7}
+
+.method{margin-top:44px;border-top:1px solid var(--rule);padding-top:24px;display:grid;gap:32px;grid-template-columns:minmax(0,1fr)}
+@media (min-width:920px){.method{grid-template-columns:minmax(0,1fr) minmax(0,1.25fr)}}
+.story p{max-width:62ch;margin:0 0 12px}
+.story p:last-child{margin-bottom:0}
+footer{margin-top:40px;font-size:12.5px;color:var(--ink-soft);border-top:1px solid var(--rule);padding-top:14px}
+
+@media (prefers-reduced-motion: reduce){*{transition:none!important;animation:none!important}}
+</style>
+
+<div class="wrap">
+  <header class="head">
+    <p class="eyebrow">USS SCORPION · SSN-589 · 1968 · 북대서양</p>
+    <h1>베이즈 잠수함 수색</h1>
+    <p class="lede">이 해역 어딘가에 잠수함이 가라앉아 있습니다. 위치는 매번 무작위로 정해집니다. 칸을 눌러 수색하면 ‘찾지 못했다’는 결과가 베이즈 정리를 거쳐 해도 전체의 확률을 다시 칠합니다. ‘수색자의 가정’에서 존재 확률이나 탐지 확률을 모르는 경우로 바꿔 볼 수 있습니다.</p>
+  </header>
+
+  <main class="layout">
+    <section class="chartcol" aria-label="수색 해도">
+      <div class="toolbar">
+        <div class="seg" role="group" aria-label="지도 층" id="layerSeg">
+          <button type="button" id="ly-p" data-v="p" aria-pressed="true">존재 확률 P</button>
+          <button type="button" id="ly-q" data-v="q" aria-pressed="false">탐지 확률 q</button>
+          <button type="button" id="ly-pq" data-v="pq" aria-pressed="false">발견 확률 P×q</button>
+        </div>
+        <div class="scalewrap">
+          <span class="mini">색 기준</span>
+          <div class="seg" role="group" aria-label="색 기준" id="scaleSeg">
+            <button type="button" id="sc-live" data-v="live" aria-pressed="true">현재 최대</button>
+            <button type="button" id="sc-fixed" data-v="fixed" aria-pressed="false">처음 최대</button>
+          </div>
+        </div>
+      </div>
+      <div class="map" id="frame">
+        <canvas id="map" tabindex="0" aria-label="수색 해도. 칸을 누르면 그 칸을 수색합니다. 방향키로 칸을 고르고 Enter로 수색할 수 있습니다."></canvas>
+      </div>
+      <div class="legend">
+        <div class="ramp" aria-hidden="true">
+          <div class="bar" id="rampBar"></div>
+          <div class="ramp-labels"><span id="rl0">0</span><span id="rl1"></span><span id="rl2"></span></div>
+        </div>
+        <p class="legend-note" id="legendNote"></p>
+      </div>
+      <p class="readout" id="readout"></p>
+    </section>
+
+    <aside class="side">
+      <div class="status">
+        <div class="status-line" aria-live="polite"><span class="pill" id="pill">대기</span><span id="statusText"></span></div>
+        <dl class="readouts">
+          <div><dt>수색 횟수</dt><dd id="rN">0</dd></div>
+          <div><dt>누적 발견 확률</dt><dd id="rCum">0%</dd></div>
+          <div><dt>최고 확률 칸</dt><dd id="rMax">–</dd></div>
+          <div><dt>유효 후보 칸</dt><dd id="rEff">–</dd></div>
+        </dl>
+      </div>
+
+      <div class="controls">
+        <div class="row2">
+          <button type="button" class="btn primary" id="bBest">최적 칸 수색</button>
+          <button type="button" class="btn" id="bAuto" aria-pressed="false">자동 수색</button>
+        </div>
+        <div class="row3">
+          <button type="button" class="btn" id="bRetry">같은 해도로 다시</button>
+          <button type="button" class="btn" id="bNew">새 해역</button>
+          <button type="button" class="btn" id="bReveal" aria-pressed="false">정답 보기</button>
+        </div>
+        <div class="set-row">
+          <div class="top"><label for="speed">자동 수색 속도</label><output id="speedOut">보통</output></div>
+          <input type="range" id="speed" min="0" max="100" step="1" value="55">
+        </div>
+      </div>
+
+      <div class="card update" id="updateCard"></div>
+
+      <section class="group truth" aria-labelledby="gTruth">
+        <h2 class="grp-h" id="gTruth">실제 바다</h2>
+        <p class="grp-sub">정답입니다. 수색자는 이 값들을 모릅니다.</p>
+        <div class="set-row">
+          <div class="top"><span>잠수함 위치</span></div>
+          <div class="seg full" role="group" aria-label="잠수함 위치" id="placeSeg">
+            <button type="button" id="pl-prior" data-v="prior" aria-pressed="true">시나리오대로</button>
+            <button type="button" id="pl-unif" data-v="uniform" aria-pressed="false">아무 데나</button>
+          </div>
+          <p class="help">‘시나리오대로’는 전문가 판단에 맞춰, ‘아무 데나’는 해도 전체에서 고르게 숨깁니다. 바꾸면 같은 해도에서 새로 숨깁니다.</p>
+        </div>
+        <div class="set-row">
+          <div class="top"><label for="etaTrue">카메라 썰매 실제 성능</label><output id="etaTrueOut">60%</output></div>
+          <input type="range" id="etaTrue" min="30" max="100" step="5" value="60">
+          <p class="help">얕고 평탄한 칸에서 잠수함을 잡아낼 확률입니다. 깊고 험한 칸에서는 이 값의 40%까지 떨어집니다.</p>
+        </div>
+      </section>
+
+      <section class="group belief" aria-labelledby="gBelief">
+        <h2 class="grp-h" id="gBelief">수색자의 가정</h2>
+        <p class="grp-sub">바꾸면 지금까지의 수색 기록을 새 가정으로 다시 계산합니다.</p>
+        <div class="set-row">
+          <div class="top"><span>존재 확률</span></div>
+          <div class="seg full" role="group" aria-label="존재 확률 가정" id="priorSeg">
+            <button type="button" id="pr-scen" data-v="scenario" aria-pressed="true">전문가 시나리오</button>
+            <button type="button" id="pr-unif" data-v="uniform" aria-pressed="false">모름 · 균등</button>
+          </div>
+          <div class="scen" id="scenBox"><ul id="scenList"></ul></div>
+          <div class="sub-set" id="floorRow">
+            <div class="top"><label for="floor">시나리오 밖 여지</label><output id="floorOut">6%</output></div>
+            <input type="range" id="floor" min="0" max="30" step="1" value="6">
+          </div>
+          <p class="help" id="priorHelp"></p>
+        </div>
+        <div class="set-row">
+          <div class="top"><span>탐지 성능</span></div>
+          <div class="seg full" role="group" aria-label="탐지 성능 가정" id="qSeg">
+            <button type="button" id="qm-exact" data-v="exact" aria-pressed="true">정확히 앎</button>
+            <button type="button" id="qm-wrong" data-v="wrong" aria-pressed="false">잘못 앎</button>
+            <button type="button" id="qm-unk" data-v="unknown" aria-pressed="false">모름</button>
+          </div>
+          <div class="sub-set" id="wrongRow" hidden>
+            <div class="top"><label for="etaBelief">수색자가 믿는 성능</label><output id="etaBeliefOut">95%</output></div>
+            <input type="range" id="etaBelief" min="20" max="100" step="5" value="95">
+          </div>
+          <div class="sub-set etapost" id="etaPost" hidden></div>
+          <p class="help" id="qHelp"></p>
+        </div>
+      </section>
+    </aside>
+  </main>
+
+  <section class="history">
+    <h2>수색 기록</h2>
+    <div class="charts">
+      <figure>
+        <figcaption>누적 발견 확률</figcaption>
+        <div class="chart" id="chartA"></div>
+        <p class="cap">가로축은 수색 횟수. 수색자의 가정으로 계산한, 지금까지의 수색으로 잠수함을 찾았을 확률 1 − ∏(1 − P·q)입니다.</p>
+      </figure>
+      <figure>
+        <figcaption>잠수함이 실제로 있던 칸의 P</figcaption>
+        <div class="chart" id="chartB"></div>
+        <p class="cap">다른 칸을 뒤질수록 오르고, 이 칸을 뒤지고도 놓치면(빈 원) 떨어집니다.</p>
+      </figure>
+    </div>
+  </section>
+
+  <section class="cost" aria-labelledby="costH">
+    <div class="cost-head">
+      <div>
+        <h2 id="costH">모르면 얼마나 더 뒤져야 할까</h2>
+        <p class="intro">베이즈 탐색에서 확률은 수색자가 아는 것을 적은 기록입니다. 그래서 ‘모른다’는 상태도 확률로 적을 수 있습니다. 잠수함 위치를 모르면 모든 칸에 같은 확률을 주고, 장비 성능을 모르면 가능한 성능 값마다 확률을 나눠 준 뒤 위치와 함께 갱신합니다.</p>
+        <p class="intro">아래는 지금 해도에서 잠수함을 300번 새로 숨기고, 수색자의 가정만 바꿔 매번 ‘최적 칸 수색’으로 찾게 한 결과입니다. 잠수함 위치와 탐지 성공 여부의 난수는 모든 줄에 똑같이 썼습니다. 실제 바다 설정이나 시나리오 밖 여지를 바꾸면 다시 계산합니다.</p>
+      </div>
+      <div class="cost-run">
+        <button type="button" class="btn" id="bExp">다시 실험</button>
+        <span class="mini" id="expStatus" aria-live="polite"></span>
+      </div>
+    </div>
+    <div class="cmp-legend" aria-hidden="true">
+      <span><i class="lg-dot"></i>절반을 찾을 때까지</span>
+      <span><i class="lg-wh"></i>90%를 찾을 때까지</span>
+      <span><i class="lg-cur"></i>지금 설정과 같은 종류의 가정</span>
+    </div>
+    <div class="cmp" id="cmp"></div>
+    <p class="cap">‘시나리오대로’로 숨길 때도 잠수함의 6%는 어느 시나리오에도 맞지 않는 곳에 숨습니다. 이런 잠수함은 시나리오 안을 충분히 뒤진 다음에야 차례가 오기 때문에, 시나리오를 쓰는 줄도 90%에 이르기까지 오래 걸립니다.</p>
+
+    <div class="notes three">
+      <div>
+        <h3>존재 확률을 모를 때</h3>
+        <p>아는 것이 없으면 모든 칸에 같은 확률을 줍니다. 시나리오를 쓸 때도 ‘시나리오 밖 여지’를 조금 남겨 둡니다. 확률을 0으로 둔 칸은 실패가 아무리 쌓여도 0에 머물러 끝내 수색 차례가 오지 않습니다. 여지를 0%로 두고 잠수함을 ‘아무 데나’ 숨겨 보면 차이가 보입니다.</p>
+      </div>
+      <div>
+        <h3>탐지 확률을 모를 때</h3>
+        <p>성능을 하나의 값으로 정하지 않고 20%에서 100% 사이의 값마다 확률을 나눠 둡니다. 같은 칸에서 실패가 쌓이면 ‘여기 없다’와 ‘장비가 놓쳤다’는 두 설명이 경쟁하고, 성능 추정치가 조금씩 내려갑니다. 그만큼 한 번 뒤진 칸을 성급하게 지우지 않습니다.</p>
+      </div>
+      <div>
+        <h3>에어프랑스 447편, 2009</h3>
+        <p>대서양에 추락한 에어프랑스 447편의 잔해는 2년 가까이 발견되지 않았습니다. 초기 음향 수색은 블랙박스 수중 신호기가 작동한다고 보았고, 신호가 잡히지 않은 해역의 확률은 크게 깎였습니다. 2011년 메트론 분석팀이 신호기가 고장 났을 경우의 확률 지도를 따로 계산하자 마지막 위치 부근 중심부가 유력해졌고, 그곳부터 뒤진 수색은 일주일 만에 잔해를 찾았습니다. 분석팀은 신호기 고장 여부와 잔해 위치를 처음부터 함께 추정했어야 했다고 정리했습니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <section class="method">
+    <div class="story">
+      <h2>1968년, 스코피언</h2>
+      <p>1968년 5월, 지중해 임무를 마치고 노퍽으로 돌아가던 미 해군 핵잠수함 스코피언(SSN-589)이 승조원 99명과 함께 연락이 끊겼습니다. 마지막 위치조차 확실하지 않았고, 바다는 수천 미터 깊이였습니다.</p>
+      <p>해군 특수계획국의 수석 과학자 존 크레이븐은 잠수함·해양 전문가들에게 침몰 경위를 여러 시나리오로 세우게 하고, 시나리오마다 위스키 내기를 걸게 해 가능성의 크기를 정했습니다. 이것을 해역을 나눈 칸마다의 확률로 바꾼 뒤, 수색 결과가 나올 때마다 지도를 고쳐 나갔습니다. 2년 전 스페인 팔로마레스 앞바다에 떨어진 수소폭탄을 찾을 때 쓴 방법이기도 합니다.</p>
+      <p>그해 10월 말, 해양조사선 미자르가 아조레스 제도 남서쪽 수심 약 3,000 m 해저에서 선체를 찾았습니다.</p>
+    </div>
+    <div class="notes">
+      <div>
+        <h3>사전 확률</h3>
+        <p>시나리오마다 가중치를 정하고, 각 시나리오가 가리키는 지점 주변에 확률을 퍼뜨린 뒤 모두 더합니다. 어느 시나리오에도 맞지 않는 경우를 위해 해도 전체에 일부를 고르게 깔아 둡니다.</p>
+      </div>
+      <div>
+        <h3>탐지 확률 q</h3>
+        <p>잠수함이 있는 칸을 뒤져도 놓칠 수 있습니다. 깊고 험한 해저일수록 카메라 썰매가 놓치기 쉬워 q가 낮습니다. ‘탐지 확률 q’ 층에서 볼 수 있습니다.</p>
+      </div>
+      <div>
+        <h3>못 찾았을 때의 갱신</h3>
+        <p>
+          <span class="formula">수색한 칸: P′ = P(1 − q) / (1 − P·q)<br>나머지 칸: P′ = P / (1 − P·q)</span>
+          수색한 칸만 줄고 나머지는 모두 같은 배율로 커지므로 해도의 합은 늘 100%입니다. 실패한 수색도 정보입니다.
+        </p>
+      </div>
+      <div>
+        <h3>다음엔 어디를 볼까</h3>
+        <p>한 번 수색해서 찾을 확률은 P×q입니다. 이 값이 가장 큰 칸(해도의 주황 점선)을 고르는 것이 ‘최적 칸 수색’입니다. 이미 뒤진 칸도 확률이 남아 있으면 다시 차례가 옵니다.</p>
+      </div>
+    </div>
+  </section>
+
+  <footer>해도, 수심, 시나리오는 매번 새로 만드는 가상의 값입니다. 좌표는 실제 침몰 해역 부근을 본뜬 예시이며 1칸은 위도·경도 5′입니다. 에어프랑스 447편 내용은 Stone 외, “Search for the Wreckage of Air France Flight AF 447”(Statistical Science, 2014)을 따랐습니다.</footer>
+</div>
+
+<script>
+(() => {
+  const COLS = 24, ROWS = 20, N = COLS * ROWS;
+  const LAT_TOP = 33 * 60 + 50, LON_LEFT = 34 * 60 + 10, STEP = 5;
+  const GAMMA = 0.55, TRUTH_FLOOR = 0.06;
+  const DEPTH0 = 2900, DEPTH_SPAN = 750;
+  const LEVELS = [0.2, 0.4, 0.6, 0.8];
+  const ETA_GRID = Array.from({ length: 17 }, (_, k) => Math.round((0.2 + k * 0.05) * 100) / 100);
+  const RUNS = 300, CAP = 2000;
+  const SCEN_NAMES = [
+    '어뢰 오작동 후 180° 선회',
+    '축전지 폭발, 항로 위 침몰',
+    '쓰레기 배출구로 침수',
+    '잠항 심도 통제 실패',
+    '추진 계통 고장 후 표류'
+  ];
+  const reduceMotion = matchMedia('(prefers-reduced-motion: reduce)').matches;
+  const noHover = matchMedia('(hover: none)').matches;
+
+  const $ = id => document.getElementById(id);
+  const canvas = $('map'), ctx = canvas.getContext('2d'), frame = $('frame');
+
+  let S = null;   // the sea: terrain, scenarios, truth distribution
+  let R = null;   // this search: where the sub is, what was searched
+  let B = null;   // the searcher's belief: joint P(cell, equipment efficiency)
+  const view = {
+    layer: 'p', scale: 'live', placement: 'prior', etaTrue: 0.6,
+    priorMode: 'scenario', floor: 0.06, qMode: 'exact', etaBelief: 0.95,
+    speed: 0.55, hover: -1, sel: -1, auto: false, reveal: false
+  };
+  let dispP = new Float64Array(N), dispD = new Float64Array(N);
+  let anim = null, ping = null, tag = null, pulse = null, rafOn = false, autoTimer = null;
+  const geom = { W: 0, H: 0, L: 46, T: 18, R: 8, B: 24, cell: 10, dpr: 1, narrow: false };
+  let pal = {}, heatLUT = [], detLUT = [];
+
+  /* ---------- helpers ---------- */
+  const rand = (a, b) => a + Math.random() * (b - a);
+  const shuffle = a => { for (let i = a.length - 1; i > 0; i--) { const j = Math.random() * (i + 1) | 0; [a[i], a[j]] = [a[j], a[i]]; } return a; };
+  const colOf = i => i % COLS, rowOf = i => (i / COLS) | 0;
+  const fmtP = p => { const v = p * 100; if (v >= 10) return v.toFixed(1) + '%'; if (v >= 1) return v.toFixed(2) + '%'; if (v >= 0.01) return v.toFixed(3) + '%'; return v > 0 ? '<0.01%' : '0%'; };
+  const fmtMin = m => { const d = Math.floor(m / 60), mm = m - d * 60; const ms = (Math.round(mm * 10) / 10).toFixed(mm % 1 ? 1 : 0); return d + '°' + (mm < 10 ? '0' : '') + ms + '′'; };
+  const latStr = i => fmtMin(LAT_TOP - (rowOf(i) + 0.5) * STEP) + 'N';
+  const lonStr = i => fmtMin(LON_LEFT - (colOf(i) + 0.5) * STEP) + 'W';
+  const depthOf = i => Math.round((DEPTH0 + DEPTH_SPAN * S.ter.cellT[i]) / 10) * 10;
+  const clampQ = v => Math.min(0.98, Math.max(0.02, v));
+  const qTrue = i => clampQ(view.etaTrue * S.g[i]);
+  const pct = v => Math.round(v * 100) + '%';
+  const fmtInt = v => Math.round(v).toLocaleString('ko-KR');
+  const arrMax = a => { let m = -Infinity; for (let i = 0; i < a.length; i++) if (a[i] > m) m = a[i]; return m; };
+  function mulberry32(a) { return function () { a |= 0; a = a + 0x6D2B79F5 | 0; let t = Math.imul(a ^ a >>> 15, 1 | a); t = t + Math.imul(t ^ t >>> 7, 61 | t) ^ t; return ((t ^ t >>> 14) >>> 0) / 4294967296; }; }
+  function sampleFrom(p, rng) { const r = rng(); let acc = 0; for (let i = 0; i < N; i++) { acc += p[i]; if (r < acc) return i; } return N - 1; }
+  const cssVar = n => getComputedStyle(document.documentElement).getPropertyValue(n).trim();
+  const hexRgb = h => { h = h.replace('#', ''); if (h.length === 3) h = h.split('').map(c => c + c).join(''); return [parseInt(h.slice(0, 2), 16), parseInt(h.slice(2, 4), 16), parseInt(h.slice(4, 6), 16)]; };
+  function buildLUT(stops) {
+    const out = new Array(256), cs = stops.map(([t, c]) => [t, hexRgb(c)]);
+    for (let k = 0; k < 256; k++) {
+      const t = k / 255; let s = 0;
+      while (s < cs.length - 2 && t > cs[s + 1][0]) s++;
+      const [t0, a] = cs[s], [t1, b] = cs[s + 1], u = Math.min(1, Math.max(0, (t - t0) / (t1 - t0)));
+      out[k] = `rgb(${Math.round(a[0] + (b[0] - a[0]) * u)},${Math.round(a[1] + (b[1] - a[1]) * u)},${Math.round(a[2] + (b[2] - a[2]) * u)})`;
+    }
+    return out;
+  }
+  function refreshPalette() {
+    pal.sea = cssVar('--sea') || '#0d2230';
+    heatLUT = buildLUT([[0, pal.sea], [0.16, '#1b2f58'], [0.36, '#56306f'], [0.56, '#ac3f4f'], [0.76, '#ef7b2f'], [1, '#fde7a8']]);
+    detLUT = buildLUT([[0, pal.sea], [0.5, '#1f6676'], [1, '#b6eadc']]);
+  }
+
+  /* ---------- the sea ---------- */
+  function makeTerrain() {
+    const bumps = [];
+    for (let k = 0; k < 8; k++) bumps.push({ x: rand(-3, COLS + 3), y: rand(-3, ROWS + 3), s: rand(2.5, 7), a: rand(-1, 1) });
+    const tx = rand(-0.03, 0.03), ty = rand(-0.03, 0.03);
+    const f = (x, y) => { let v = tx * x + ty * y; for (const b of bumps) { const dx = x - b.x, dy = y - b.y; v += b.a * Math.exp(-(dx * dx + dy * dy) / (2 * b.s * b.s)); } return v; };
+    const Rz = 3, fw = COLS * Rz + 1, fh = ROWS * Rz + 1, fine = new Float64Array(fw * fh);
+    let mn = Infinity, mx = -Infinity;
+    for (let j = 0; j < fh; j++) for (let i = 0; i < fw; i++) { const v = f(i / Rz, j / Rz); fine[j * fw + i] = v; if (v < mn) mn = v; if (v > mx) mx = v; }
+    const span = (mx - mn) || 1;
+    for (let k = 0; k < fine.length; k++) fine[k] = (fine[k] - mn) / span;
+    const cellT = new Float64Array(N);
+    for (let i = 0; i < N; i++) cellT[i] = Math.min(1, Math.max(0, (f(colOf(i) + 0.5, rowOf(i) + 0.5) - mn) / span));
+    const segs = [];
+    for (const lv of LEVELS) {
+      for (let j = 0; j < fh - 1; j++) for (let i = 0; i < fw - 1; i++) {
+        const a = fine[j * fw + i], b = fine[j * fw + i + 1], c = fine[(j + 1) * fw + i + 1], d = fine[(j + 1) * fw + i];
+        const pts = [];
+        const e = (v1, v2, x1, y1, x2, y2) => { if ((v1 < lv) !== (v2 < lv)) { const t = (lv - v1) / (v2 - v1); pts.push([(x1 + (x2 - x1) * t) / Rz, (y1 + (y2 - y1) * t) / Rz]); } };
+        e(a, b, i, j, i + 1, j); e(b, c, i + 1, j, i + 1, j + 1); e(d, c, i, j + 1, i + 1, j + 1); e(a, d, i, j, i, j + 1);
+        if (pts.length >= 2) segs.push(pts[0], pts[1]);
+        if (pts.length === 4) segs.push(pts[2], pts[3]);
+      }
+    }
+    return { cellT, segs };
+  }
+
+  function makeScenarios() {
+    const track = { x0: COLS + 1, y0: rand(ROWS * 0.55, ROWS * 0.85), x1: -1, y1: rand(ROWS * 0.15, ROWS * 0.45) };
+    const K = Math.random() < 0.5 ? 3 : 4;
+    const names = shuffle(SCEN_NAMES.slice());
+    const dx = track.x1 - track.x0, dy = track.y1 - track.y0, len = Math.hypot(dx, dy), nx = -dy / len, ny = dx / len;
+    const scen = [];
+    let tries = 0;
+    while (scen.length < K && tries < 800) {
+      tries++;
+      const t = rand(0.1, 0.9), off = rand(-3.5, 3.5);
+      const cx = track.x0 + dx * t + nx * off, cy = track.y0 + dy * t + ny * off;
+      if (cx < 2.5 || cx > COLS - 2.5 || cy < 2.5 || cy > ROWS - 2.5) continue;
+      if (scen.some(s => Math.hypot(s.cx - cx, s.cy - cy) < 5)) continue;
+      scen.push({ cx, cy, sa: rand(1.8, 4.2), sb: rand(1.0, 2.2), ang: rand(0, Math.PI), w: rand(0.6, 1.6) });
+    }
+    const tot = scen.reduce((a, s) => a + s.w, 0);
+    scen.forEach(s => s.w = s.w / tot);
+    scen.sort((a, b) => b.w - a.w);
+    scen.forEach((s, k) => { s.letter = 'ABCD'[k]; s.name = names[k]; });
+    return { scen, track };
+  }
+
+  function makeMix(scen) {
+    const p = new Float64Array(N);
+    for (const s of scen) {
+      const g = new Float64Array(N), ca = Math.cos(s.ang), sn = Math.sin(s.ang);
+      let tot = 0;
+      for (let i = 0; i < N; i++) {
+        const x = colOf(i) + 0.5 - s.cx, y = rowOf(i) + 0.5 - s.cy;
+        const u = x * ca + y * sn, v = -x * sn + y * ca;
+        g[i] = Math.exp(-0.5 * (u * u / (s.sa * s.sa) + v * v / (s.sb * s.sb)));
+        tot += g[i];
+      }
+      for (let i = 0; i < N; i++) p[i] += s.w * g[i] / tot;
+    }
+    let sum = 0; for (let i = 0; i < N; i++) sum += p[i];
+    for (let i = 0; i < N; i++) p[i] /= sum;
+    return p;
+  }
+  const withFloor = (mix, f) => { const p = new Float64Array(N); for (let i = 0; i < N; i++) p[i] = (1 - f) * mix[i] + f / N; return p; };
+
+  function newSea() {
+    const ter = makeTerrain();
+    const g = new Float64Array(N);
+    for (let i = 0; i < N; i++) g[i] = 1 - 0.6 * ter.cellT[i];
+    const { scen, track } = makeScenarios();
+    const mix = makeMix(scen);
+    S = { ter, g, scen, track, mix, truthPrior: withFloor(mix, TRUTH_FLOOR) };
+    newRun();
+    renderScenarios();
+    scheduleExperiment(80);
+  }
+
+  function newRun() {
+    stopAuto();
+    R = {
+      truth: view.placement === 'prior' ? sampleFrom(S.truthPrior, Math.random) : (Math.random() * N | 0),
+      subAng: rand(-0.6, 0.6), log: [], found: false, counts: new Uint16Array(N), note: ''
+    };
+    initBelief();
+    dispP = B.P.slice(); dispD = B.D.slice();
+    anim = ping = tag = pulse = null;
+    view.reveal = false; view.sel = -1;
+    $('bReveal').setAttribute('aria-pressed', 'false');
+    updatePanels(); draw(performance.now());
+  }
+
+  /* ---------- the searcher's belief ---------- */
+  function beliefPrior() {
+    if (view.priorMode === 'uniform') return new Float64Array(N).fill(1 / N);
+    return withFloor(S.mix, view.floor);
+  }
+  function beliefEtas() {
+    if (view.qMode === 'unknown') return ETA_GRID.slice();
+    if (view.qMode === 'wrong') return [view.etaBelief];
+    return [view.etaTrue];
+  }
+  function initBelief() {
+    const etas = beliefEtas(), K = etas.length, prior = beliefPrior();
+    const J = new Float64Array(K * N);
+    for (let k = 0; k < K; k++) for (let i = 0; i < N; i++) J[k * N + i] = prior[i] / K;
+    B = { etas, K, J, prior, P: new Float64Array(N), D: new Float64Array(N), cumMiss: 1, cumHist: [0], trueHist: [], trueMiss: [] };
+    refreshPD();
+    B.fixedMaxP = arrMax(B.P); B.fixedMaxD = arrMax(B.D);
+    B.trueHist.push(B.P[R.truth]);
+  }
+  // P(i) = Σ_η J(i,η) ;  D(i) = Σ_η J(i,η)·q(i,η)  = chance the next search of i finds it
+  function refreshPD() {
+    const { J, etas, K, P, D } = B, g = S.g;
+    P.fill(0); D.fill(0);
+    for (let k = 0; k < K; k++) {
+      const e = etas[k], o = k * N;
+      for (let i = 0; i < N; i++) { const j = J[o + i]; P[i] += j; D[i] += j * clampQ(e * g[i]); }
+    }
+  }
+  function cellStats(c, etaOv) {
+    let p = 0, d = 0;
+    for (let k = 0; k < B.K; k++) {
+      const j = B.J[k * N + c], q = clampQ((etaOv ?? B.etas[k]) * S.g[c]);
+      p += j; d += j * q;
+    }
+    return { p0: p, qbar: p > 0 ? d / p : 0, pq: d };
+  }
+  function applyMiss(c, etaOv) {
+    const st = cellStats(c, etaOv), denom = 1 - st.pq, inv = 1 / denom, J = B.J;
+    for (let k = 0; k < B.K; k++) J[k * N + c] *= 1 - clampQ((etaOv ?? B.etas[k]) * S.g[c]);
+    for (let x = 0; x < J.length; x++) J[x] *= inv;
+    refreshPD();
+    B.cumMiss *= denom;
+    return Object.assign(st, { denom, p1: B.P[c], factor: inv });
+  }
+  function absorb(e) {
+    const ov = view.qMode === 'exact' ? e.etaT : undefined;
+    if (e.hit) {
+      const st = cellStats(e.i, ov);
+      Object.assign(e, st, { denom: 1 - st.pq });
+      B.cumMiss *= 1 - st.pq;
+      B.cumHist.push(1 - B.cumMiss); B.trueHist.push(null);
+    } else {
+      Object.assign(e, applyMiss(e.i, ov));
+      B.cumHist.push(1 - B.cumMiss); B.trueHist.push(B.P[R.truth]);
+      if (e.i === R.truth) B.trueMiss.push(e.n);
+    }
+  }
+  function replay() { initBelief(); for (const e of R.log) absorb(e); }
+
+  function bestCell() {
+    let b = 0, bv = -1;
+    for (let i = 0; i < N; i++) if (B.D[i] > bv) { bv = B.D[i]; b = i; }
+    return b;
+  }
+
+  function startAnim(fromP, fromD, i, dur) {
+    if (reduceMotion) { dispP = B.P.slice(); dispD = B.D.slice(); return; }
+    anim = { fromP, toP: B.P.slice(), fromD, toD: B.D.slice(), t0: performance.now(), dur, i };
+  }
+
+  function search(i) {
+    if (!S || R.found || i < 0) return;
+    const qt = qTrue(i);
+    const hit = i === R.truth && Math.random() < qt;
+    const e = { n: R.log.length + 1, i, etaT: view.etaTrue, qt, hit };
+    const fromP = dispP.slice(), fromD = dispD.slice();
+    R.counts[i]++; R.log.push(e); R.note = '';
+    absorb(e);
+    if (hit) R.found = true;
+
+    const now = performance.now();
+    const dur = view.auto ? Math.min(480, autoInterval() * 0.85) : 520;
+    startAnim(fromP, fromD, i, dur);
+    if (!reduceMotion) {
+      ping = { i, t0: now, dur: dur + 150 };
+      if (!hit) tag = { i, text: fmtP(e.p0) + ' → ' + fmtP(e.p1), t0: now, dur: view.auto ? Math.max(500, autoInterval() * 1.6) : 1700 };
+    }
+    if (hit) { stopAuto(); pulse = reduceMotion ? null : { t0: now, dur: 1400 }; }
+    updatePanels();
+    kick();
+  }
+
+  function beliefChanged() {
+    const fromP = dispP.slice(), fromD = dispD.slice();
+    replay();
+    R.note = R.log.length ? `같은 수색 기록 ${R.log.length}회를 바뀐 가정으로 다시 계산했습니다.` : '';
+    startAnim(fromP, fromD, -1, 600);
+    updatePanels(); renderCmp(); kick();
+  }
+
+  /* ---------- rendering: map ---------- */
+  function layout() {
+    const w = frame.clientWidth || 600;
+    geom.narrow = w < 520;
+    geom.L = geom.narrow ? 40 : 48; geom.R = 8; geom.T = geom.narrow ? 12 : 14; geom.B = geom.narrow ? 20 : 24;
+    geom.cell = (w - geom.L - geom.R) / COLS;
+    geom.W = w; geom.H = Math.round(geom.T + geom.cell * ROWS + geom.B);
+    geom.dpr = Math.min(2, window.devicePixelRatio || 1);
+    canvas.width = Math.round(w * geom.dpr); canvas.height = Math.round(geom.H * geom.dpr);
+    canvas.style.height = geom.H + 'px';
+  }
+
+  const ease = t => 1 - Math.pow(1 - t, 3);
+
+  function kick() { if (!rafOn) { rafOn = true; requestAnimationFrame(frameLoop); } }
+  function frameLoop(now) {
+    let active = false;
+    if (anim) {
+      const t = Math.min(1, (now - anim.t0) / anim.dur), e = ease(t);
+      for (let k = 0; k < N; k++) {
+        dispP[k] = anim.fromP[k] + (anim.toP[k] - anim.fromP[k]) * e;
+        dispD[k] = anim.fromD[k] + (anim.toD[k] - anim.fromD[k]) * e;
+      }
+      if (t >= 1) { dispP = anim.toP.slice(); dispD = anim.toD.slice(); anim.done = true; } else active = true;
+    }
+    if (ping && now - ping.t0 < ping.dur) active = true; else ping = null;
+    if (tag && now - tag.t0 < tag.dur) active = true; else tag = null;
+    if (pulse && now - pulse.t0 < pulse.dur) active = true; else pulse = null;
+    draw(now);
+    if (anim && anim.done) anim = null;
+    if (active) requestAnimationFrame(frameLoop); else rafOn = false;
+  }
+
+  function gx(x) { return geom.L + x * geom.cell; }
+  function gy(y) { return geom.T + y * geom.cell; }
+
+  function layerVals(srcP, srcD) {
+    const vals = new Float64Array(N);
+    if (view.layer === 'q') { for (let i = 0; i < N; i++) vals[i] = srcP[i] > 0 ? srcD[i] / srcP[i] : 0; return { vals, smax: 1, lut: detLUT, gamma: 1 }; }
+    const src = view.layer === 'pq' ? srcD : srcP;
+    for (let i = 0; i < N; i++) vals[i] = src[i];
+    const smax = view.scale === 'fixed' ? (view.layer === 'pq' ? B.fixedMaxD : B.fixedMaxP) : arrMax(vals);
+    return { vals, smax, lut: heatLUT, gamma: GAMMA };
+  }
+
+  function draw(now) {
+    if (!S || !B) return;
+    const { W, H, L, T, cell, dpr } = geom;
+    ctx.setTransform(dpr, 0, 0, dpr, 0, 0);
+    ctx.fillStyle = pal.sea; ctx.fillRect(0, 0, W, H);
+
+    const { vals, smax, lut, gamma } = layerVals(dispP, dispD);
+    const shade = v => { let t = smax > 0 ? Math.min(1, v / smax) : 0; if (gamma !== 1) t = Math.pow(t, gamma); return lut[Math.round(t * 255)]; };
+    for (let i = 0; i < N; i++) {
+      ctx.fillStyle = shade(vals[i]);
+      ctx.fillRect(gx(colOf(i)), gy(rowOf(i)), cell + 0.6, cell + 0.6);
+    }
+
+    // renormalisation glow: every other cell rises by the same factor
+    if (anim && anim.i >= 0 && view.layer !== 'q') {
+      const t = Math.min(1, (now - anim.t0) / anim.dur);
+      const a = 0.16 * (1 - t);
+      if (a > 0.005) {
+        ctx.fillStyle = `rgba(255,170,90,${a})`;
+        ctx.fillRect(L, T, COLS * cell, ROWS * cell);
+        const ci = anim.i;
+        ctx.fillStyle = shade(vals[ci]);
+        ctx.fillRect(gx(colOf(ci)), gy(rowOf(ci)), cell, cell);
+      }
+    }
+
+    // grid
+    ctx.strokeStyle = 'rgba(200,222,232,0.07)'; ctx.lineWidth = 1;
+    ctx.beginPath();
+    for (let c = 0; c <= COLS; c++) { const x = Math.round(gx(c)) + 0.5; ctx.moveTo(x, T); ctx.lineTo(x, T + ROWS * cell); }
+    for (let r = 0; r <= ROWS; r++) { const y = Math.round(gy(r)) + 0.5; ctx.moveTo(L, y); ctx.lineTo(L + COLS * cell, y); }
+    ctx.stroke();
+
+    // depth contours
+    ctx.save();
+    ctx.beginPath(); ctx.rect(L, T, COLS * cell, ROWS * cell); ctx.clip();
+    ctx.strokeStyle = view.layer === 'q' ? 'rgba(230,245,240,0.32)' : 'rgba(205,225,235,0.2)';
+    ctx.lineWidth = 0.9;
+    ctx.beginPath();
+    const sg = S.ter.segs;
+    for (let k = 0; k < sg.length; k += 2) { ctx.moveTo(gx(sg[k][0]), gy(sg[k][1])); ctx.lineTo(gx(sg[k + 1][0]), gy(sg[k + 1][1])); }
+    ctx.stroke();
+
+    // planned track
+    const tr = S.track;
+    ctx.setLineDash([6, 5]); ctx.strokeStyle = 'rgba(230,240,245,0.38)'; ctx.lineWidth = 1.2;
+    ctx.beginPath(); ctx.moveTo(gx(tr.x0), gy(tr.y0)); ctx.lineTo(gx(tr.x1), gy(tr.y1)); ctx.stroke();
+    ctx.setLineDash([]);
+    {
+      const ax = 1.2, at = (ax - tr.x0) / (tr.x1 - tr.x0), ay = tr.y0 + (tr.y1 - tr.y0) * at;
+      const ang = Math.atan2(gy(tr.y1) - gy(tr.y0), gx(tr.x1) - gx(tr.x0));
+      ctx.save(); ctx.translate(gx(ax), gy(ay)); ctx.rotate(ang);
+      ctx.fillStyle = 'rgba(230,240,245,0.55)';
+      ctx.beginPath(); ctx.moveTo(7, 0); ctx.lineTo(-2, -4.5); ctx.lineTo(-2, 4.5); ctx.closePath(); ctx.fill();
+      ctx.restore();
+      ctx.font = `${geom.narrow ? 9.5 : 10.5}px "IBM Plex Sans KR", system-ui, sans-serif`;
+      ctx.fillStyle = 'rgba(230,240,245,0.62)'; ctx.textAlign = 'left'; ctx.textBaseline = 'bottom';
+      const lx = 2.2, lt = (lx - tr.x0) / (tr.x1 - tr.x0), ly = tr.y0 + (tr.y1 - tr.y0) * lt;
+      ctx.fillText('예정 항로 · 노퍽 방향', gx(lx), gy(ly) - 5);
+    }
+
+    // scenario markers (dimmed when the searcher ignores them)
+    if (view.layer !== 'q') {
+      const r = Math.max(7, Math.min(10, cell * 0.42));
+      ctx.globalAlpha = view.priorMode === 'uniform' ? 0.45 : 1;
+      ctx.font = `600 ${Math.round(r * 1.1)}px "IBM Plex Sans KR", system-ui, sans-serif`;
+      ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+      for (const s of S.scen) {
+        const x = gx(s.cx), y = gy(s.cy);
+        ctx.beginPath(); ctx.arc(x, y, r, 0, Math.PI * 2);
+        ctx.fillStyle = 'rgba(9,24,34,0.72)'; ctx.fill();
+        ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(253,231,168,0.85)'; ctx.stroke();
+        ctx.fillStyle = '#fde7a8'; ctx.fillText(s.letter, x, y + 0.5);
+      }
+      ctx.globalAlpha = 1;
+    }
+    ctx.restore();
+
+    // searched marks
+    ctx.textAlign = 'center'; ctx.textBaseline = 'middle';
+    ctx.font = `500 ${Math.max(9, Math.round(cell * 0.5))}px "IBM Plex Mono", monospace`;
+    for (let i = 0; i < N; i++) {
+      const c = R.counts[i]; if (!c) continue;
+      const x = gx(colOf(i) + 0.5), y = gy(rowOf(i) + 0.5);
+      if (c >= 2 && cell >= 15) { ctx.fillStyle = 'rgba(240,248,250,0.85)'; ctx.fillText(String(c), x, y + 0.5); }
+      else {
+        ctx.beginPath(); ctx.arc(x, y, Math.max(2, cell * 0.17), 0, Math.PI * 2);
+        ctx.lineWidth = 1.2; ctx.strokeStyle = 'rgba(240,248,250,0.75)'; ctx.stroke();
+        if (c >= 2) { ctx.beginPath(); ctx.arc(x, y, Math.max(3.5, cell * 0.32), 0, Math.PI * 2); ctx.stroke(); }
+      }
+    }
+
+    // recommended next cell
+    if (!R.found) {
+      const b = bestCell();
+      ctx.setLineDash([3, 2]); ctx.lineWidth = 1.6; ctx.strokeStyle = '#ff7a3d';
+      ctx.strokeRect(gx(colOf(b)) + 1, gy(rowOf(b)) + 1, cell - 2, cell - 2);
+      ctx.setLineDash([]);
+    }
+
+    // hover / selection
+    const hi = view.sel >= 0 ? view.sel : view.hover;
+    if (hi >= 0) {
+      ctx.lineWidth = 1.6; ctx.strokeStyle = view.sel >= 0 ? '#fde7a8' : 'rgba(255,255,255,0.9)';
+      ctx.strokeRect(gx(colOf(hi)) + 0.5, gy(rowOf(hi)) + 0.5, cell - 1, cell - 1);
+    }
+
+    // sonar ping
+    if (ping) {
+      const t = Math.min(1, (now - ping.t0) / ping.dur);
+      const x = gx(colOf(ping.i) + 0.5), y = gy(rowOf(ping.i) + 0.5);
+      for (const k of [0, 0.3]) {
+        const tt = t - k; if (tt <= 0) continue;
+        ctx.beginPath(); ctx.arc(x, y, cell * 0.4 + ease(tt) * cell * 2.4, 0, Math.PI * 2);
+        ctx.lineWidth = 1.5; ctx.strokeStyle = `rgba(253,231,168,${0.8 * (1 - tt)})`; ctx.stroke();
+      }
+    }
+
+    // truth
+    if (R.found || view.reveal) {
+      const ti = R.truth, x = gx(colOf(ti) + 0.5), y = gy(rowOf(ti) + 0.5);
+      const rr = Math.max(13, cell * 1.35);
+      ctx.beginPath(); ctx.arc(x, y, rr, 0, Math.PI * 2);
+      if (R.found) { ctx.lineWidth = 2; ctx.strokeStyle = '#7fe0b0'; ctx.stroke(); }
+      else { ctx.setLineDash([4, 3]); ctx.lineWidth = 1.4; ctx.strokeStyle = 'rgba(255,255,255,0.8)'; ctx.stroke(); ctx.setLineDash([]); }
+      if (pulse) {
+        const t = (now - pulse.t0) / pulse.dur;
+        for (const k of [0, 0.25, 0.5]) {
+          const tt = t - k; if (tt <= 0 || tt >= 1) continue;
+          ctx.beginPath(); ctx.arc(x, y, rr + ease(tt) * cell * 4, 0, Math.PI * 2);
+          ctx.lineWidth = 2; ctx.strokeStyle = `rgba(127,224,176,${0.7 * (1 - tt)})`; ctx.stroke();
+        }
+      }
+      drawSub(x, y, Math.max(24, cell * 2.1), R.subAng);
+    }
+
+    // floating change tag
+    if (tag) {
+      const t = (now - tag.t0) / tag.dur;
+      const alpha = t < 0.7 ? 1 : Math.max(0, 1 - (t - 0.7) / 0.3);
+      const x = gx(colOf(tag.i) + 0.5), y0 = gy(rowOf(tag.i)) - 6 - ease(Math.min(1, t * 1.5)) * 8;
+      ctx.font = `500 ${geom.narrow ? 10.5 : 11.5}px "IBM Plex Mono", monospace`;
+      const tw = ctx.measureText(tag.text).width + 12, th = 18;
+      const bx = Math.min(Math.max(x - tw / 2, L + 2), L + COLS * cell - tw - 2);
+      let by = y0 - th; if (by < 2) by = gy(rowOf(tag.i) + 1) + 6;
+      ctx.globalAlpha = alpha;
+      ctx.fillStyle = 'rgba(6,16,23,0.9)'; ctx.fillRect(bx, by, tw, th);
+      ctx.strokeStyle = 'rgba(253,231,168,0.6)'; ctx.lineWidth = 1; ctx.strokeRect(bx + 0.5, by + 0.5, tw - 1, th - 1);
+      ctx.fillStyle = '#fde7a8'; ctx.textAlign = 'left'; ctx.textBaseline = 'middle';
+      ctx.fillText(tag.text, bx + 6, by + th / 2 + 0.5);
+      ctx.globalAlpha = 1;
+    }
+
+    // axes
+    ctx.fillStyle = '#8fa8b5';
+    ctx.font = `${geom.narrow ? 9.5 : 10.5}px "IBM Plex Mono", monospace`;
+    ctx.textAlign = 'right'; ctx.textBaseline = 'middle';
+    ctx.strokeStyle = 'rgba(160,190,205,0.4)'; ctx.lineWidth = 1;
+    for (let k = 0; k <= ROWS; k += 4) {
+      const y = gy(k);
+      ctx.fillText(fmtMin(LAT_TOP - k * STEP), L - 6, Math.max(6, y));
+      ctx.beginPath(); ctx.moveTo(L - 3, Math.round(y) + 0.5); ctx.lineTo(L, Math.round(y) + 0.5); ctx.stroke();
+    }
+    const lstep = cell * 4 >= 50 ? 4 : (cell * 6 >= 50 ? 6 : 8);
+    ctx.textBaseline = 'alphabetic';
+    for (let k = 0; k <= COLS; k += lstep) {
+      const x = gx(k);
+      ctx.textAlign = k === COLS ? 'right' : (k === 0 ? 'left' : 'center');
+      ctx.fillText(fmtMin(LON_LEFT - k * STEP), k === 0 ? x - 2 : (k === COLS ? x + 6 : x), H - 6);
+      ctx.beginPath(); ctx.moveTo(Math.round(x) + 0.5, T + ROWS * cell); ctx.lineTo(Math.round(x) + 0.5, T + ROWS * cell + 3); ctx.stroke();
+    }
+  }
+
+  function drawSub(cx, cy, len, ang) {
+    const h = len * 0.27;
+    ctx.save(); ctx.translate(cx, cy); ctx.rotate(ang);
+    ctx.beginPath(); ctx.ellipse(0, 0, len / 2, h / 2, 0, 0, Math.PI * 2);
+    ctx.fillStyle = '#f2ede2'; ctx.fill();
+    ctx.lineWidth = 1.5; ctx.strokeStyle = '#0a1a24'; ctx.stroke();
+    ctx.fillStyle = '#0a1a24';
+    ctx.fillRect(-len * 0.16, -h * 0.17, len * 0.16, h * 0.34);
+    ctx.beginPath(); ctx.moveTo(len / 2 - 1, 0); ctx.lineTo(len / 2 + 3, -h * 0.35); ctx.lineTo(len / 2 + 3, h * 0.35); ctx.closePath(); ctx.fill();
+    ctx.restore();
+  }
+
+  /* ---------- panels ---------- */
+  function updateLegend() {
+    const lut = view.layer === 'q' ? detLUT : heatLUT;
+    const stops = [];
+    for (let k = 0; k <= 10; k++) stops.push(lut[Math.round(k / 10 * 255)] + ' ' + (k * 10) + '%');
+    $('rampBar').style.background = `linear-gradient(90deg, ${stops.join(',')})`;
+    let sum = 0; for (let i = 0; i < N; i++) sum += B.P[i];
+    const sumTxt = `해도 ${N}칸 합계 ${(sum * 100).toFixed(1)}%`;
+    if (view.layer === 'q') {
+      $('rl0').textContent = '0'; $('rl1').textContent = '0.5'; $('rl2').textContent = '1';
+      const msg = {
+        exact: '그 칸에 잠수함이 있을 때 한 번의 수색으로 찾아낼 확률. 깊고 험한 곳일수록 낮습니다.',
+        wrong: '수색자가 믿는 탐지 확률입니다. 실제 값은 ‘실제 바다’의 성능을 따릅니다.',
+        unknown: '가능한 성능 값들을 지금의 추정으로 평균낸 탐지 확률입니다. 뒤지고도 놓친 칸일수록 값이 내려갑니다.'
+      }[view.qMode];
+      $('legendNote').textContent = msg + ' 가는 선은 150 m 간격 등심선.';
+    } else {
+      const { smax } = layerVals(B.P, B.D);
+      $('rl0').textContent = '0';
+      $('rl1').textContent = fmtP(smax * Math.pow(0.5, 1 / GAMMA));
+      $('rl2').textContent = (view.scale === 'fixed' ? '≥' : '') + fmtP(smax);
+      $('legendNote').textContent = view.layer === 'p'
+        ? `${sumTxt}. A–D는 전문가 시나리오, 원은 수색한 칸, 주황 점선은 다음 추천 칸입니다. 위도 N · 경도 W.`
+        : `한 번 수색해서 찾을 확률. 가장 밝은 칸이 다음 추천 칸입니다. ${sumTxt}.`;
+    }
+  }
+
+  function updateReadout() {
+    const el = $('readout');
+    const i = view.sel >= 0 ? view.sel : view.hover;
+    if (!S || !B) return;
+    if (i < 0) {
+      el.innerHTML = noHover
+        ? '칸을 한 번 누르면 그 칸의 확률이 보이고, 한 번 더 누르면 수색합니다.'
+        : '칸 위에 커서를 올리면 그 칸의 확률이 보입니다. 누르면 수색합니다. 방향키와 Enter도 됩니다.';
+      return;
+    }
+    const p = B.P[i], qb = p > 0 ? B.D[i] / p : 0;
+    const parts = [
+      `<b>${latStr(i)} ${lonStr(i)}</b>`,
+      `수심 ≈ ${depthOf(i).toLocaleString('ko-KR')} m`,
+      `P <b>${fmtP(p)}</b>`,
+      `q${view.qMode === 'exact' ? '' : ' 추정'} <b>${qb.toFixed(2)}</b>`
+    ];
+    if (view.qMode !== 'exact') parts.push(`<span class="tru">실제 q ${qTrue(i).toFixed(2)}</span>`);
+    parts.push(`P×q <b>${fmtP(B.D[i])}</b>`, `수색 ${R.counts[i]}회`);
+    let html = parts.join(' · ');
+    if (view.sel >= 0 && !R.found) html += ` · <span class="hint">한 번 더 누르면 수색</span>`;
+    el.innerHTML = html;
+  }
+
+  function renderScenarios() {
+    const uni = view.priorMode === 'uniform', f = view.floor;
+    let html = '';
+    for (const s of S.scen) {
+      const w = s.w * (1 - f);
+      html += `<li><span class="chip">${s.letter}</span><span>${s.name}</span><span class="w">${(w * 100).toFixed(0)}%</span><span class="wbar"><i style="width:${(w * 100).toFixed(1)}%"></i></span></li>`;
+    }
+    html += `<li><span class="chip floor">·</span><span>그 밖의 어딘가 (해도 전체에 고르게)</span><span class="w">${(f * 100).toFixed(0)}%</span><span class="wbar"><i style="width:${(f * 100).toFixed(1)}%"></i></span></li>`;
+    $('scenList').innerHTML = html;
+    $('scenBox').classList.toggle('dim', uni);
+    $('floorRow').hidden = uni;
+    $('priorHelp').textContent = uni
+      ? `수색자는 위 시나리오를 쓰지 않고 ${N}칸 모두 ${fmtP(1 / N)}에서 시작합니다. 처음에는 얕아서 찾기 쉬운 칸부터 뒤집니다.`
+      : (f === 0
+        ? '여지가 0%라 시나리오에서 먼 칸은 사실상 영영 뒤지지 않습니다.'
+        : '여지는 어느 시나리오에도 맞지 않을 경우를 위해 해도 전체에 고르게 까는 확률입니다.');
+  }
+
+  function qHelpText() {
+    if (view.qMode === 'exact') return '수색자가 썰매의 실제 성능을 정확히 안다고 봅니다.';
+    if (view.qMode === 'wrong') {
+      const d = view.etaBelief - view.etaTrue;
+      if (Math.abs(d) < 1e-9) return '지금은 믿는 값이 실제와 같습니다. 슬라이더로 어긋나게 해 보세요.';
+      return d > 0
+        ? `실제(${pct(view.etaTrue)})보다 높게 믿고 있습니다. 한 번 뒤진 칸을 너무 빨리 지웁니다.`
+        : `실제(${pct(view.etaTrue)})보다 낮게 믿고 있습니다. 같은 칸을 필요 이상 다시 뒤집니다.`;
+    }
+    return '성능을 20%에서 100% 사이 17개 값으로 나눠 두고 잠수함 위치와 함께 갱신합니다. 못 찾을 때마다 낮은 성능 쪽에 무게가 조금씩 실립니다.';
+  }
+
+  function renderEtaPost() {
+    const box = $('etaPost');
+    $('wrongRow').hidden = view.qMode !== 'wrong';
+    $('qHelp').textContent = qHelpText();
+    if (view.qMode !== 'unknown') { box.hidden = true; return; }
+    box.hidden = false;
+    const K = B.K, m = new Float64Array(K);
+    let tot = 0;
+    for (let k = 0; k < K; k++) { let s = 0; const o = k * N; for (let i = 0; i < N; i++) s += B.J[o + i]; m[k] = s; tot += s; }
+    let mean = 0; for (let k = 0; k < K; k++) { m[k] /= tot; mean += m[k] * B.etas[k]; }
+    const W = 300, Hh = 92, l = 6, r = 6, t = 16, b = 18, bw = (W - l - r) / K, ih = Hh - t - b;
+    const ymax = Math.max(arrMax(m), 1 / K) * 1.25;
+    const Y = v => t + ih * (1 - v / ymax);
+    const X = v => l + (v - ETA_GRID[0]) / 0.05 * bw + bw / 2;
+    let s = '';
+    for (let k = 0; k < K; k++) s += `<rect class="bar" x="${(l + k * bw + 1).toFixed(1)}" y="${Y(m[k]).toFixed(1)}" width="${(bw - 2).toFixed(1)}" height="${(t + ih - Y(m[k])).toFixed(1)}"/>`;
+    s += `<line class="axis" x1="${l}" x2="${W - r}" y1="${t + ih}" y2="${t + ih}"/>`;
+    s += `<line class="base" x1="${l}" x2="${W - r}" y1="${Y(1 / K).toFixed(1)}" y2="${Y(1 / K).toFixed(1)}"/>`;
+    s += `<text x="${W - r}" y="${(Y(1 / K) - 4).toFixed(1)}" text-anchor="end">처음(균등)</text>`;
+    const tx = X(view.etaTrue);
+    s += `<line class="truth" x1="${tx.toFixed(1)}" x2="${tx.toFixed(1)}" y1="${t - 4}" y2="${t + ih}"/>`;
+    s += `<text class="tl" x="${(tx + (tx > W - 60 ? -5 : 5)).toFixed(1)}" y="${t + 2}" text-anchor="${tx > W - 60 ? 'end' : 'start'}">실제</text>`;
+    for (const v of [0.2, 0.6, 1.0]) s += `<text x="${X(v).toFixed(1)}" y="${Hh - 4}" text-anchor="${v === 0.2 ? 'start' : v === 1 ? 'end' : 'middle'}">${pct(v)}</text>`;
+    box.innerHTML = `<div class="ttl">수색자가 추정한 썰매 성능</div>
+      <div class="sum">추정 평균 <b>${pct(mean)}</b> · <span class="tru">실제 ${pct(view.etaTrue)}</span></div>
+      <svg viewBox="0 0 ${W} ${Hh}" role="img" aria-label="썰매 성능 추정 분포. 평균 ${pct(mean)}">${s}</svg>`;
+  }
+
+  function qLine(e) {
+    if (view.qMode === 'exact') return `q = ${e.qbar.toFixed(2)}`;
+    if (view.qMode === 'wrong') return `수색자가 쓴 q = ${e.qbar.toFixed(2)} · <span class="tru">실제 q = ${e.qt.toFixed(2)}</span>`;
+    return `유효 q = ${e.qbar.toFixed(2)} (가능한 성능 값의 가중 평균) · <span class="tru">실제 q = ${e.qt.toFixed(2)}</span>`;
+  }
+
+  function updateCard() {
+    const el = $('updateCard');
+    const last = R.log[R.log.length - 1];
+    if (!last) {
+      el.innerHTML = `<h3 class="h-sm">베이즈 갱신</h3>
+        <div class="eq">
+          <div class="lab">수색한 칸에서 못 찾으면</div>
+          <div class="f">P′ = P × (1 − q) / (1 − P·q)</div>
+          <div class="lab">나머지 모든 칸</div>
+          <div class="f">P′ = P / (1 − P·q)</div>
+          ${view.qMode === 'unknown' ? '<div class="lab">탐지 성능을 모를 때</div><div class="n">q 자리에 그 칸에서 가능한 성능 값들의 가중 평균을 씁니다</div>' : ''}
+        </div>
+        <p class="upd-note">첫 수색을 하면 이 자리에 실제 숫자가 들어갑니다.</p>`;
+      return;
+    }
+    const where = `${latStr(last.i)} ${lonStr(last.i)}`;
+    if (last.hit) {
+      el.innerHTML = `<div class="upd-head"><b>#${last.n} 수색</b><span>${where}</span><span class="pill ok">발견</span></div>
+        <div class="eq">
+          <div class="lab">이 칸의 확률</div>
+          <div class="n">P = ${fmtP(last.p0)}</div>
+          <div class="lab">이 칸에서 쓴 탐지 확률</div>
+          <div class="n">${qLine(last)}</div>
+          <div class="lab">수색자가 본 이번 수색의 성공 확률</div>
+          <div class="n">P × q = <b>${fmtP(last.pq)}</b></div>
+        </div>
+        <p class="upd-note">잠수함이 이 칸에 있었고 카메라 썰매가 잡아냈습니다. 이제 이 칸의 확률은 100%입니다.</p>`;
+      return;
+    }
+    const extra = view.qMode === 'unknown'
+      ? ' 같은 칸에서 또 놓치면 이 칸의 유효 q는 더 내려갑니다. ‘장비가 놓쳤다’는 설명에 무게가 실리기 때문입니다.'
+      : '';
+    el.innerHTML = `<div class="upd-head"><b>#${last.n} 수색</b><span>${where}</span><span class="pill run">못 찾음</span></div>
+      <div class="eq">
+        <div class="lab">이 칸에서 쓴 탐지 확률</div>
+        <div class="n">${qLine(last)}</div>
+        <div class="lab">못 찾을 확률</div>
+        <div class="n">1 − P·q = 1 − ${fmtP(last.p0)} × ${last.qbar.toFixed(2)} = <b>${last.denom.toFixed(4)}</b></div>
+        <div class="lab">수색한 칸</div>
+        <div class="n">${fmtP(last.p0)} × ${(1 - last.qbar).toFixed(2)} ÷ ${last.denom.toFixed(4)} = <b>${fmtP(last.p1)}</b></div>
+        <div class="lab">나머지 ${N - 1}칸 모두</div>
+        <div class="n">P × 1/${last.denom.toFixed(4)} = <b>P × ${last.factor.toFixed(4)}</b></div>
+      </div>
+      <p class="upd-note">빠져나간 ${fmtP(last.p0 - last.p1)}가 나머지 칸에 원래 크기에 비례해 나눠졌습니다.${extra}</p>`;
+  }
+
+  function updatePanels() {
+    const n = R.log.length;
+    let mx = 0, H = 0;
+    for (let i = 0; i < N; i++) { const p = B.P[i]; if (p > mx) mx = p; if (p > 0) H -= p * Math.log(p); }
+    $('rN').textContent = n;
+    $('rCum').textContent = R.found ? '100%' : fmtP(1 - B.cumMiss);
+    $('rMax').textContent = R.found ? '100%' : fmtP(mx);
+    $('rEff').innerHTML = R.found ? '1<small>칸</small>' : `${Math.round(Math.exp(H))}<small>칸</small>`;
+
+    const pill = $('pill'), st = $('statusText');
+    if (R.found) {
+      pill.className = 'pill ok'; pill.textContent = '발견';
+      let msg = `${n}번째 수색에서 ${latStr(R.truth)} ${lonStr(R.truth)}에서 찾았습니다.`;
+      if (view.priorMode === 'uniform') msg += ' 균등 분포로 시작했으니 처음엔 모든 칸의 확률이 같았습니다.';
+      else {
+        const pr = B.prior, v = pr[R.truth];
+        let rank = 1; for (let i = 0; i < N; i++) if (pr[i] > v) rank++;
+        msg += ` 수색자의 처음 확률로는 ${N}칸 중 ${rank}번째로 유력한 칸이었습니다.`;
+      }
+      st.textContent = msg;
+    } else if (R.note) {
+      pill.className = 'pill run'; pill.textContent = '다시 계산';
+      st.textContent = R.note;
+    } else if (n === 0) {
+      pill.className = 'pill'; pill.textContent = '대기';
+      st.textContent = '칸을 눌러 첫 수색을 하세요. 주황 점선 칸이 지금 발견 확률이 가장 높은 곳입니다.';
+    } else {
+      pill.className = 'pill run'; pill.textContent = view.auto ? '자동' : '수색 중';
+      st.textContent = '아직 못 찾았습니다. 뒤진 칸은 어두워지고 나머지 칸은 같은 비율로 밝아집니다.';
+    }
+    $('bBest').disabled = R.found;
+    $('bAuto').disabled = R.found;
+    $('bAuto').textContent = view.auto ? '자동 멈춤' : '자동 수색';
+    $('bAuto').setAttribute('aria-pressed', view.auto ? 'true' : 'false');
+    $('bReveal').disabled = R.found;
+    updateCard(); updateLegend(); updateReadout(); renderCharts(); renderEtaPost();
+  }
+
+  /* ---------- history charts ---------- */
+  function niceStep(range, maxTicks) {
+    const raw = range / maxTicks, mag = Math.pow(10, Math.floor(Math.log10(raw)));
+    for (const m of [1, 2, 2.5, 5, 10]) if (m * mag >= raw) return m * mag;
+    return 10 * mag;
+  }
+  const fmtTick = v => { const x = +(v * 100).toPrecision(6); return (Math.round(x * 100) / 100) + '%'; };
+
+  function chartFrame(w, h, m, xmax, ymax, yStep, yFmt) {
+    const iw = w - m.l - m.r, ih = h - m.t - m.b;
+    const X = v => m.l + v / xmax * iw, Y = v => m.t + (1 - v / ymax) * ih;
+    let s = '';
+    for (let yv = 0; yv <= ymax + 1e-12; yv += yStep) {
+      s += `<line class="grid" x1="${m.l}" x2="${w - m.r}" y1="${Y(yv).toFixed(1)}" y2="${Y(yv).toFixed(1)}"/>`;
+      s += `<text class="ax" x="${m.l - 6}" y="${Y(yv).toFixed(1)}" text-anchor="end" dominant-baseline="middle">${yFmt(yv)}</text>`;
+    }
+    const xs = Math.max(1, niceStep(xmax, w < 360 ? 4 : 6));
+    for (let xv = 0; xv <= xmax + 1e-9; xv += xs) s += `<text class="ax" x="${X(xv).toFixed(1)}" y="${h - 6}" text-anchor="middle">${Math.round(xv)}</text>`;
+    return { s, X, Y };
+  }
+
+  function endLabel(x, y, text, w, m, cls) {
+    const anchor = x > w - 72 ? 'end' : 'start';
+    const tx = anchor === 'end' ? x - 8 : x + 8;
+    const ty = y < m.t + 14 ? y + 16 : y - 8;
+    return `<text class="${cls}" x="${tx.toFixed(1)}" y="${ty.toFixed(1)}" text-anchor="${anchor}">${text}</text>`;
+  }
+
+  function renderCharts() {
+    const n = R.log.length, h = 190, m = { l: 48, r: 14, t: 14, b: 26 };
+    const a = $('chartA');
+    if (n === 0) a.innerHTML = '<div class="chart-empty">첫 수색을 하면 기록이 쌓입니다.</div>';
+    else {
+      const w = Math.max(260, a.clientWidth), xmax = Math.max(10, n);
+      const fr = chartFrame(w, h, m, xmax, 1, 0.25, v => Math.round(v * 100) + '%');
+      const pts = B.cumHist.map((v, k) => [fr.X(k), fr.Y(v)]);
+      const line = 'M' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('L');
+      const area = line + `L${pts[pts.length - 1][0].toFixed(1)},${fr.Y(0).toFixed(1)}L${fr.X(0).toFixed(1)},${fr.Y(0).toFixed(1)}Z`;
+      let s = fr.s + `<path class="area" d="${area}"/><path class="line" d="${line}"/>`;
+      const lp = pts[pts.length - 1];
+      s += `<circle class="dot" cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="3.5"/>`;
+      s += endLabel(lp[0], lp[1], fmtP(B.cumHist[n]), w, m, 'val');
+      if (R.found) {
+        const fx = fr.X(n).toFixed(1);
+        s += `<line class="fline" x1="${fx}" x2="${fx}" y1="${m.t}" y2="${h - m.b}"/>`;
+      }
+      a.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="수색 횟수에 따른 누적 발견 확률">${s}</svg>`;
+    }
+
+    const b = $('chartB');
+    if (!(R.found || view.reveal)) {
+      b.innerHTML = '<div class="chart-empty">잠수함을 찾거나 ‘정답 보기’를 켜면 공개됩니다.</div>';
+      return;
+    }
+    const w = Math.max(260, b.clientWidth), xmax = Math.max(10, n);
+    const vals = B.trueHist.filter(v => v != null);
+    const vmax = Math.max(...vals, 1e-6);
+    const yStep = niceStep(vmax * 1.12, 4), ymax = Math.ceil(vmax * 1.12 / yStep) * yStep;
+    const fr = chartFrame(w, h, m, xmax, ymax, yStep, fmtTick);
+    const pts = [];
+    B.trueHist.forEach((v, k) => { if (v != null) pts.push([fr.X(k), fr.Y(v), k]); });
+    const line = 'M' + pts.map(p => p[0].toFixed(1) + ',' + p[1].toFixed(1)).join('L');
+    let s = fr.s;
+    if (pts.length > 1) {
+      const area = line + `L${pts[pts.length - 1][0].toFixed(1)},${fr.Y(0).toFixed(1)}L${pts[0][0].toFixed(1)},${fr.Y(0).toFixed(1)}Z`;
+      s += `<path class="areaB" d="${area}"/>`;
+    }
+    s += `<path class="lineB" d="${line}"/>`;
+    for (const k of B.trueMiss) { const v = B.trueHist[k]; s += `<circle class="miss" cx="${fr.X(k).toFixed(1)}" cy="${fr.Y(v).toFixed(1)}" r="4"/>`; }
+    const lp = pts[pts.length - 1];
+    s += `<circle class="dotB" cx="${lp[0].toFixed(1)}" cy="${lp[1].toFixed(1)}" r="3.5"/>`;
+    if (R.found) {
+      const fx = fr.X(n);
+      s += `<line class="fline" x1="${fx.toFixed(1)}" x2="${fx.toFixed(1)}" y1="${m.t}" y2="${h - m.b}"/>`;
+      s += `<text class="flbl" x="${(fx - 6).toFixed(1)}" y="${m.t + 10}" text-anchor="end">발견</text>`;
+    } else {
+      s += endLabel(lp[0], lp[1], fmtP(B.trueHist[n]), w, m, 'val');
+    }
+    b.innerHTML = `<svg width="${w}" height="${h}" viewBox="0 0 ${w} ${h}" role="img" aria-label="잠수함이 있던 칸의 확률 변화">${s}</svg>`;
+  }
+
+  /* ---------- cost-of-ignorance experiment ---------- */
+  let expGen = 0, expTimer = null, expCfgs = null, expRes = null;
+
+  function simConfigs() {
+    const et = view.etaTrue;
+    const hi = Math.min(0.98, Math.round((et + 0.3) * 100) / 100);
+    const lo = Math.max(0.1, Math.round((et - 0.3) * 100) / 100);
+    return [
+      { key: 'scenario|exact', prior: 'scenario', q: 'exact', name: '시나리오 · 성능 정확히 앎', sub: '위치도 성능도 아는 경우' },
+      { key: 'uniform|exact', prior: 'uniform', q: 'exact', name: '균등 · 성능 정확히 앎', sub: '어디 있을지 전혀 모름' },
+      { key: 'scenario|hi', prior: 'scenario', q: 'fixed', eta: hi, name: '시나리오 · 성능 과신', sub: `${pct(hi)}로 믿음, 실제 ${pct(et)}` },
+      { key: 'scenario|lo', prior: 'scenario', q: 'fixed', eta: lo, name: '시나리오 · 성능 과소평가', sub: `${pct(lo)}로 믿음, 실제 ${pct(et)}` },
+      { key: 'scenario|unknown', prior: 'scenario', q: 'unknown', name: '시나리오 · 성능 모름', sub: '20~100% 분포로 두고 함께 추정' },
+      { key: 'uniform|unknown', prior: 'uniform', q: 'unknown', name: '균등 · 성능 모름', sub: '둘 다 모름' }
+    ];
+  }
+  function currentKey() {
+    let qc = view.qMode;
+    if (qc === 'wrong') qc = view.etaBelief > view.etaTrue + 1e-9 ? 'hi' : view.etaBelief < view.etaTrue - 1e-9 ? 'lo' : 'exact';
+    return view.priorMode + '|' + qc;
+  }
+
+  function siftDown(h, D, idx) {
+    const item = h[idx], v = D[item];
+    for (;;) {
+      const l = 2 * idx + 1; if (l >= N) break;
+      const r = l + 1, m = (r < N && D[h[r]] > D[h[l]]) ? r : l;
+      if (D[h[m]] <= v) break;
+      h[idx] = h[m]; idx = m;
+    }
+    h[idx] = item;
+  }
+  function buildHeap(D) { const h = new Int32Array(N); for (let i = 0; i < N; i++) h[i] = i; for (let i = (N >> 1) - 1; i >= 0; i--) siftDown(h, D, i); return h; }
+
+  // One config, RUNS hidden subs. Unnormalised joint weights: only the searched cell changes,
+  // so the best cell is the root of a max-heap on D and each step costs O(K + log N).
+  function runConfig(cfg, truths, seeds, qT) {
+    const etas = cfg.q === 'unknown' ? ETA_GRID : [cfg.q === 'exact' ? view.etaTrue : cfg.eta];
+    const K = etas.length;
+    const prior = cfg.prior === 'uniform' ? new Float64Array(N).fill(1 / N) : withFloor(S.mix, view.floor);
+    const qk = new Float64Array(K * N), J0 = new Float64Array(K * N), D0 = new Float64Array(N);
+    for (let k = 0; k < K; k++) for (let i = 0; i < N; i++) { const x = k * N + i; qk[x] = clampQ(etas[k] * S.g[i]); J0[x] = prior[i]; D0[i] += J0[x] * qk[x]; }
+    const heap0 = buildHeap(D0);
+    const J = new Float64Array(K * N), D = new Float64Array(N), heap = new Int32Array(N);
+    const steps = new Float64Array(RUNS);
+    for (let r = 0; r < RUNS; r++) {
+      J.set(J0); D.set(D0); heap.set(heap0);
+      const rng = mulberry32(seeds[r]), t = truths[r];
+      let found = Infinity;
+      for (let s = 1; s <= CAP; s++) {
+        const c = heap[0];
+        if (c === t && rng() < qT[t]) { found = s; break; }
+        let d = 0;
+        for (let k = 0; k < K; k++) { const x = k * N + c; J[x] *= 1 - qk[x]; d += J[x] * qk[x]; }
+        D[c] = d; siftDown(heap, D, 0);
+      }
+      steps[r] = found;
+    }
+    steps.sort();
+    const q = p => steps[Math.ceil(p * RUNS) - 1];
+    let ok = 0; for (let r = 0; r < RUNS; r++) if (isFinite(steps[r])) ok++;
+    return { med: q(0.5), p90: q(0.9), frac: ok / RUNS };
+  }
+
+  function scheduleExperiment(delay) {
+    clearTimeout(expTimer);
+    $('cmp').classList.add('stale');
+    $('expStatus').textContent = '다시 계산하는 중…';
+    expTimer = setTimeout(runExperiment, delay);
+  }
+
+  function runExperiment() {
+    clearTimeout(expTimer);
+    const gen = ++expGen;
+    const cfgs = simConfigs();
+    const master = mulberry32((Math.random() * 4294967296) >>> 0);
+    const truths = new Int32Array(RUNS), seeds = new Uint32Array(RUNS);
+    for (let r = 0; r < RUNS; r++) {
+      truths[r] = view.placement === 'prior' ? sampleFrom(S.truthPrior, master) : Math.floor(master() * N);
+      seeds[r] = (master() * 4294967296) >>> 0;
+    }
+    const qT = new Float64Array(N); for (let i = 0; i < N; i++) qT[i] = qTrue(i);
+    const res = new Array(cfgs.length).fill(null);
+    $('expStatus').textContent = '계산 중…';
+    let ci = 0;
+    const step = () => {
+      if (gen !== expGen) return;
+      res[ci] = runConfig(cfgs[ci], truths, seeds, qT);
+      ci++;
+      if (ci < cfgs.length) { setTimeout(step, 0); return; }
+      expCfgs = cfgs; expRes = res;
+      $('cmp').classList.remove('stale');
+      $('expStatus').textContent = `잠수함 ${RUNS}척 × 가정 ${cfgs.length}가지`;
+      renderCmp();
+    };
+    setTimeout(step, 0);
+  }
+
+  function renderCmp() {
+    const el = $('cmp');
+    const cfgs = expCfgs || simConfigs(), res = expRes;
+    const cur = currentKey();
+    let lo = Infinity, hi = 0, open = false;
+    if (res) for (const r of res) {
+      for (const v of [r.med, r.p90]) { if (isFinite(v)) { lo = Math.min(lo, v); hi = Math.max(hi, v); } else open = true; }
+    }
+    if (!isFinite(lo)) { lo = 10; hi = CAP; }
+    const nice = [1, 2, 5];
+    let x0 = 1; for (let e = 0; e < 5; e++) for (const m of nice) { const v = m * Math.pow(10, e); if (v <= lo * 0.8) x0 = v; }
+    let x1 = CAP; if (!open) { outer: for (let e = 0; e < 5; e++) for (const m of nice) { const v = m * Math.pow(10, e); if (v >= hi * 1.15) { x1 = Math.min(CAP, v); break outer; } } }
+    if (open) x1 = CAP;
+    const lx0 = Math.log(x0), span = Math.log(x1) - lx0;
+    const X = v => Math.min(100, Math.max(0, (Math.log(v) - lx0) / span * 100));
+    let ticks = [];
+    for (let e = 0; e < 5; e++) for (const m of nice) { const v = m * Math.pow(10, e); if (v >= x0 && v <= x1) ticks.push(v); }
+    if (!ticks.includes(x1)) ticks.push(x1);
+    if (ticks.length > 7) ticks = ticks.filter(v => !String(v).startsWith('2') || v === x1);
+    const grid = ticks.map(v => `<i class="gl" style="left:${X(v).toFixed(2)}%"></i>`).join('');
+
+    let html = `<div class="cmp-row hdr"><div class="cmp-label">수색자의 가정</div><div>찾을 때까지 수색 횟수 (로그 눈금)</div><div class="cmp-val">절반 · 90%</div></div>`;
+    cfgs.forEach((cfg, k) => {
+      const r = res ? res[k] : null, isCur = cfg.key === cur;
+      let track = grid, val = '';
+      if (!r) { track += '<span class="wait">계산 중</span>'; val = '—'; }
+      else {
+        const mOk = isFinite(r.med), pOk = isFinite(r.p90);
+        const xm = mOk ? X(r.med) : 100, xp = pOk ? X(r.p90) : 100;
+        track += `<i class="wh${pOk ? '' : ' open'}" style="left:${xm.toFixed(2)}%;width:${Math.max(0, xp - xm).toFixed(2)}%"></i>`;
+        if (pOk) track += `<i class="cp" style="left:${xp.toFixed(2)}%"></i>`;
+        track += `<i class="dt${mOk ? '' : ' open'}" style="left:${xm.toFixed(2)}%"></i>`;
+        val = `<b>${mOk ? fmtInt(r.med) : '—'}</b> · ${pOk ? fmtInt(r.p90) : '—'}`;
+        if (r.frac < 1) val += `<small>${fmtInt(CAP)}회 안에 ${pct(r.frac)}</small>`;
+      }
+      html += `<div class="cmp-row${isCur ? ' cur' : ''}">
+        <div class="cmp-label"><b>${cfg.name}${isCur ? '<span class="pill run">지금 설정</span>' : ''}</b><span>${cfg.sub}</span></div>
+        <div class="cmp-track">${track}</div>
+        <div class="cmp-val">${val}</div>
+      </div>`;
+    });
+    html += `<div class="cmp-row axis"><div class="cmp-label"></div><div class="cmp-axis">${ticks.map((v, i) => `<span style="left:${X(v).toFixed(2)}%;${i === 0 ? 'transform:none' : (v === x1 ? 'transform:translateX(-100%)' : '')}">${fmtInt(v)}</span>`).join('')}</div><div></div></div>`;
+    el.innerHTML = html;
+  }
+
+  /* ---------- auto ---------- */
+  const autoInterval = () => Math.round(950 - view.speed * 880);
+  function startAuto() { if (R.found) return; view.auto = true; updatePanels(); autoStep(); }
+  function autoStep() {
+    if (!view.auto || R.found) { stopAuto(); return; }
+    search(bestCell());
+    if (view.auto && !R.found) autoTimer = setTimeout(autoStep, autoInterval());
+  }
+  function stopAuto() {
+    clearTimeout(autoTimer); autoTimer = null;
+    if (view.auto) { view.auto = false; if (R && B) updatePanels(); }
+  }
+
+  /* ---------- input ---------- */
+  function cellAt(ev) {
+    const r = canvas.getBoundingClientRect();
+    const c = Math.floor((ev.clientX - r.left - geom.L) / geom.cell), rr = Math.floor((ev.clientY - r.top - geom.T) / geom.cell);
+    return (c < 0 || c >= COLS || rr < 0 || rr >= ROWS) ? -1 : rr * COLS + c;
+  }
+  let down = null;
+  canvas.addEventListener('pointerdown', e => { down = { x: e.clientX, y: e.clientY, type: e.pointerType }; });
+  canvas.addEventListener('pointerup', e => {
+    if (!down) return;
+    const moved = Math.hypot(e.clientX - down.x, e.clientY - down.y) > 10;
+    const type = down.type; down = null;
+    if (moved) return;
+    const i = cellAt(e); if (i < 0) return;
+    if (type === 'touch') {
+      if (view.sel === i) { search(i); }
+      else { view.sel = i; updateReadout(); draw(performance.now()); }
+    } else { view.sel = -1; search(i); }
+  });
+  canvas.addEventListener('pointercancel', () => { down = null; });
+  canvas.addEventListener('pointermove', e => {
+    if (e.pointerType !== 'mouse') return;
+    const i = cellAt(e);
+    if (i !== view.hover) { view.hover = i; updateReadout(); if (!rafOn) draw(performance.now()); }
+  });
+  canvas.addEventListener('pointerleave', () => { view.hover = -1; updateReadout(); if (!rafOn) draw(performance.now()); });
+  canvas.addEventListener('keydown', e => {
+    const k = e.key;
+    if (['ArrowLeft', 'ArrowRight', 'ArrowUp', 'ArrowDown'].includes(k)) {
+      e.preventDefault();
+      if (view.sel < 0) view.sel = bestCell();
+      let c = colOf(view.sel), r = rowOf(view.sel);
+      if (k === 'ArrowLeft') c = Math.max(0, c - 1);
+      if (k === 'ArrowRight') c = Math.min(COLS - 1, c + 1);
+      if (k === 'ArrowUp') r = Math.max(0, r - 1);
+      if (k === 'ArrowDown') r = Math.min(ROWS - 1, r + 1);
+      view.sel = r * COLS + c; updateReadout(); draw(performance.now());
+    } else if (k === 'Enter' || k === ' ') {
+      e.preventDefault();
+      if (view.sel < 0) view.sel = bestCell();
+      search(view.sel);
+    } else if (k === 'Escape') { view.sel = -1; updateReadout(); draw(performance.now()); }
+  });
+  canvas.addEventListener('blur', () => { if (view.sel >= 0 && !noHover) { view.sel = -1; updateReadout(); draw(performance.now()); } });
+
+  function seg(id, cb) {
+    const el = $(id);
+    el.addEventListener('click', e => {
+      const b = e.target.closest('button'); if (!b || b.disabled) return;
+      el.querySelectorAll('button').forEach(x => x.setAttribute('aria-pressed', x === b ? 'true' : 'false'));
+      cb(b.dataset.v);
+    });
+  }
+  seg('layerSeg', v => {
+    view.layer = v;
+    $('scaleSeg').querySelectorAll('button').forEach(b => b.disabled = v === 'q');
+    updateLegend(); draw(performance.now());
+  });
+  seg('scaleSeg', v => { view.scale = v; updateLegend(); draw(performance.now()); });
+  seg('placeSeg', v => { view.placement = v; newRun(); scheduleExperiment(150); });
+  seg('priorSeg', v => { view.priorMode = v; renderScenarios(); beliefChanged(); });
+  seg('qSeg', v => { view.qMode = v; beliefChanged(); });
+
+  $('bBest').addEventListener('click', () => { view.sel = -1; search(bestCell()); });
+  $('bAuto').addEventListener('click', () => view.auto ? stopAuto() : startAuto());
+  $('bRetry').addEventListener('click', () => newRun());
+  $('bNew').addEventListener('click', () => newSea());
+  $('bReveal').addEventListener('click', () => {
+    view.reveal = !view.reveal;
+    $('bReveal').setAttribute('aria-pressed', view.reveal ? 'true' : 'false');
+    renderCharts(); draw(performance.now());
+  });
+  $('bExp').addEventListener('click', () => { $('cmp').classList.add('stale'); runExperiment(); });
+
+  $('etaTrue').addEventListener('input', e => {
+    view.etaTrue = +e.target.value / 100;
+    $('etaTrueOut').textContent = e.target.value + '%';
+    if (view.qMode === 'exact') { B.etas[0] = view.etaTrue; refreshPD(); dispP = B.P.slice(); dispD = B.D.slice(); }
+    updatePanels(); draw(performance.now()); renderCmp();
+    scheduleExperiment(400);
+  });
+  $('etaBelief').addEventListener('input', e => {
+    view.etaBelief = +e.target.value / 100;
+    $('etaBeliefOut').textContent = e.target.value + '%';
+    if (view.qMode === 'wrong') beliefChanged();
+  });
+  $('floor').addEventListener('input', e => {
+    view.floor = +e.target.value / 100;
+    $('floorOut').textContent = e.target.value + '%';
+    renderScenarios();
+    if (view.priorMode === 'scenario') beliefChanged();
+    scheduleExperiment(400);
+  });
+  const speedLabel = v => v < 25 ? '느리게' : v < 60 ? '보통' : v < 85 ? '빠르게' : '아주 빠르게';
+  $('speed').addEventListener('input', e => { view.speed = +e.target.value / 100; $('speedOut').textContent = speedLabel(+e.target.value); });
+
+  /* ---------- boot ---------- */
+  function onThemeChange() { refreshPalette(); updateLegend(); draw(performance.now()); }
+  matchMedia('(prefers-color-scheme: dark)').addEventListener('change', onThemeChange);
+  new MutationObserver(onThemeChange).observe(document.documentElement, { attributes: true, attributeFilter: ['data-theme'] });
+
+  let resizeQueued = false;
+  const ro = new ResizeObserver(() => {
+    if (resizeQueued) return; resizeQueued = true;
+    requestAnimationFrame(() => { resizeQueued = false; layout(); draw(performance.now()); if (R) renderCharts(); });
+  });
+
+  refreshPalette();
+  layout();
+  newSea();
+  renderCmp();
+  ro.observe(frame);
+  ro.observe(document.querySelector('.charts'));
+  if (document.fonts && document.fonts.ready) document.fonts.ready.then(() => draw(performance.now()));
+})();
+</script>
+
+</body></html>
